@@ -1,0 +1,392 @@
+"""
+设计院 (Studio) - FastAPI 主入口
+独立的后端服务，管理需求讨论、代码实施、部署流水线
+"""
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from studio.backend.core.database import init_db
+from studio.backend.api.projects import router as projects_router
+from studio.backend.api.discussion import router as discussion_router
+from studio.backend.api.implementation import router as implementation_router
+from studio.backend.api.deployment import router as deployment_router
+from studio.backend.api.snapshots import router as snapshots_router, system_router
+from studio.backend.api.models_api import router as models_router
+from studio.backend.api.model_config import router as model_config_router
+from studio.backend.api.copilot_auth_api import router as copilot_auth_router
+from studio.backend.api.studio_auth import router as studio_auth_router
+from studio.backend.api.endpoint_probe import router as endpoint_probe_router
+from studio.backend.api.provider_api import router as provider_router, seed_providers
+from studio.backend.api.roles import router as roles_router
+from studio.backend.api.skills import router as skills_router
+from studio.backend.api.tools import router as tools_router
+from studio.backend.api.workflows import module_router as workflow_module_router, workflow_router as workflow_router
+from studio.backend.api.tasks import project_router as tasks_project_router, task_router as tasks_router
+from studio.backend.api.ws import router as ws_router
+from studio.backend.api.users import router as users_router
+from studio.backend.api.command_auth import router as command_auth_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用启动/关闭生命周期"""
+    logger.info("🤖 设计院启动中...")
+    await init_db()
+    logger.info("✅ 数据库初始化完成")
+
+    # 自动迁移: 先于数据加载, 确保新列已存在
+    await _auto_migrate()
+
+    # 种子数据: 自定义模型 + 加载能力覆盖到内存
+    from studio.backend.api.model_config import seed_custom_models, load_capability_overrides_to_cache
+    from studio.backend.api.models_api import load_pricing_overrides_from_db
+    from studio.backend.core.database import async_session_maker
+    async with async_session_maker() as db:
+        await seed_custom_models(db)
+    await load_capability_overrides_to_cache()
+    await load_pricing_overrides_from_db()
+
+    # 种子数据: AI 服务提供商
+    await seed_providers()
+
+    # 种子数据: 内置角色
+    from studio.backend.api.roles import seed_roles
+    await seed_roles()
+
+    # 种子数据: 内置技能定义
+    from studio.backend.api.skills import seed_skills
+    await seed_skills()
+
+    # 种子数据: 内置工具定义
+    from studio.backend.api.tools import seed_tools
+    await seed_tools()
+
+    # 加载工具定义到内存缓存 (必须在 seed_tools 之后)
+    from studio.backend.services.tool_registry import load_tools_from_db
+    await load_tools_from_db()
+
+    # 种子数据: 工作流模块 + 工作流
+    from studio.backend.api.workflows import seed_workflow_modules, seed_workflows, load_workflows_to_cache
+    await seed_workflow_modules()
+    await seed_workflows()
+    await load_workflows_to_cache()
+
+    # 一次性迁移: 为 role_id=NULL 的旧项目设置默认角色
+    await _migrate_null_role_projects()
+
+    # 一次性迁移: 为旧项目的 tool_permissions 添加 ask_user
+    await _migrate_ask_user_permission()
+
+    # 恢复残留的 AI 任务 (服务重启时标记 running→failed)
+    from studio.backend.services.task_runner import TaskManager
+    await TaskManager.recover_stale_tasks()
+
+    yield
+    logger.info("🤖 设计院关闭")
+
+
+async def _auto_migrate():
+    """轻量级自动迁移: 检查并添加缺失的列"""
+    import aiosqlite
+    from studio.backend.core.config import settings
+    db_path = settings.data_path + "/studio.db"
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute("PRAGMA table_info(messages)")
+            existing = {row[1] for row in await cursor.fetchall()}
+
+            migrations = {
+                "thinking_content": "ALTER TABLE messages ADD COLUMN thinking_content TEXT",
+                "tool_calls": "ALTER TABLE messages ADD COLUMN tool_calls JSON",
+                "parent_message_id": "ALTER TABLE messages ADD COLUMN parent_message_id INTEGER",
+            }
+            for col, sql in migrations.items():
+                if col not in existing:
+                    await db.execute(sql)
+                    logger.info(f"✅ 自动迁移: 添加 messages.{col}")
+
+            # projects 表迁移
+            cursor2 = await db.execute("PRAGMA table_info(projects)")
+            proj_cols = {row[1] for row in await cursor2.fetchall()}
+            proj_migrations = {
+                "ai_muted": "ALTER TABLE projects ADD COLUMN ai_muted BOOLEAN DEFAULT 0",
+                "tool_permissions": "ALTER TABLE projects ADD COLUMN tool_permissions JSON DEFAULT '[\"read_source\", \"read_config\", \"search\", \"tree\"]'",
+                "is_archived": "ALTER TABLE projects ADD COLUMN is_archived BOOLEAN DEFAULT 0",
+                "archived_at": "ALTER TABLE projects ADD COLUMN archived_at DATETIME",
+            }
+            for col, sql in proj_migrations.items():
+                if col not in proj_cols:
+                    await db.execute(sql)
+                    logger.info(f"✅ 自动迁移: 添加 projects.{col}")
+
+            # projects.role_id 迁移
+            proj_role_migrations = {
+                "role_id": "ALTER TABLE projects ADD COLUMN role_id INTEGER REFERENCES roles(id)",
+            }
+            for col, sql in proj_role_migrations.items():
+                if col not in proj_cols:
+                    await db.execute(sql)
+                    logger.info(f"✅ 自动迁移: 添加 projects.{col}")
+
+            # projects: project_type + review 列迁移
+            proj_type_migrations = {
+                "project_type": "ALTER TABLE projects ADD COLUMN project_type VARCHAR(50) DEFAULT 'requirement'",
+                "review_content": "ALTER TABLE projects ADD COLUMN review_content TEXT DEFAULT ''",
+                "review_version": "ALTER TABLE projects ADD COLUMN review_version INTEGER DEFAULT 0",
+                "workspace_dir": "ALTER TABLE projects ADD COLUMN workspace_dir VARCHAR(500)",
+                "iteration_count": "ALTER TABLE projects ADD COLUMN iteration_count INTEGER DEFAULT 0",
+            }
+            for col, sql in proj_type_migrations.items():
+                if col not in proj_cols:
+                    await db.execute(sql)
+                    logger.info(f"✅ 自动迁移: 添加 projects.{col}")
+
+            # ai_providers 表迁移 (新表通过 init_db 创建, 此处处理列变动)
+            try:
+                cursor3 = await db.execute("PRAGMA table_info(ai_providers)")
+                prov_cols = {row[1] for row in await cursor3.fetchall()}
+                prov_migrations = {}
+                for col, sql in prov_migrations.items():
+                    if col not in prov_cols:
+                        await db.execute(sql)
+                        logger.info(f"✅ 自动迁移: 添加 ai_providers.{col}")
+            except Exception:
+                pass  # 表尚未创建, 跳过
+
+            # model_capability_overrides 表迁移: 添加定价列
+            try:
+                cursor4 = await db.execute("PRAGMA table_info(model_capability_overrides)")
+                cap_cols = {row[1] for row in await cursor4.fetchall()}
+                cap_migrations = {
+                    "premium_paid": "ALTER TABLE model_capability_overrides ADD COLUMN premium_paid FLOAT",
+                    "premium_free": "ALTER TABLE model_capability_overrides ADD COLUMN premium_free FLOAT",
+                }
+                for col, sql in cap_migrations.items():
+                    if col not in cap_cols:
+                        await db.execute(sql)
+                        logger.info(f"✅ 自动迁移: 添加 model_capability_overrides.{col}")
+            except Exception:
+                pass
+
+            # ai_tasks 表迁移 (CREATE TABLE IF NOT EXISTS)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ai_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL REFERENCES projects(id),
+                    task_type VARCHAR(50) NOT NULL DEFAULT 'discuss',
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    model VARCHAR(100) DEFAULT '',
+                    sender_name VARCHAR(100) DEFAULT '',
+                    input_message TEXT DEFAULT '',
+                    input_attachments JSON DEFAULT '[]',
+                    max_tool_rounds INTEGER DEFAULT 15,
+                    regenerate BOOLEAN DEFAULT 0,
+                    output_content TEXT DEFAULT '',
+                    thinking_content TEXT DEFAULT '',
+                    tool_calls_data JSON DEFAULT '[]',
+                    token_usage JSON,
+                    error_message TEXT DEFAULT '',
+                    result_message_id INTEGER,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    completed_at DATETIME
+                )
+            """)
+            logger.info("✅ ai_tasks 表就绪")
+
+            # roles 表迁移: 添加 default_skills 列
+            try:
+                cursor_roles = await db.execute("PRAGMA table_info(roles)")
+                role_cols = {row[1] for row in await cursor_roles.fetchall()}
+                if "default_skills" not in role_cols:
+                    await db.execute("ALTER TABLE roles ADD COLUMN default_skills JSON DEFAULT '[]'")
+                    logger.info("✅ 自动迁移: 添加 roles.default_skills")
+            except Exception:
+                pass
+
+            # skills 表: 如旧表结构不兼容 (如存在 role_prompt 列), 先 drop 再重建
+            try:
+                cursor_sk_check = await db.execute("PRAGMA table_info(skills)")
+                sk_check_cols = {row[1] for row in await cursor_sk_check.fetchall()}
+                if sk_check_cols and "role_prompt" in sk_check_cols:
+                    # 旧表结构不兼容, 需要重建
+                    await db.execute("DROP TABLE IF EXISTS skills")
+                    logger.info("✅ 删除旧 skills 表 (结构不兼容)")
+            except Exception:
+                pass
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS skills (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(100) NOT NULL UNIQUE,
+                    icon VARCHAR(10) DEFAULT '⚡',
+                    description TEXT DEFAULT '',
+                    category VARCHAR(50) DEFAULT 'general',
+                    is_builtin BOOLEAN DEFAULT 0,
+                    is_enabled BOOLEAN DEFAULT 1,
+                    instruction_prompt TEXT NOT NULL DEFAULT '',
+                    output_format TEXT DEFAULT '',
+                    examples JSON DEFAULT '[]',
+                    constraints JSON DEFAULT '[]',
+                    recommended_tools JSON DEFAULT '[]',
+                    tags JSON DEFAULT '[]',
+                    sort_order INTEGER DEFAULT 0,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """)
+            # skills 表列迁移 (旧表可能缺失新列)
+            try:
+                cursor_sk = await db.execute("PRAGMA table_info(skills)")
+                sk_cols = {row[1] for row in await cursor_sk.fetchall()}
+                skill_col_migrations = {
+                    "category": "ALTER TABLE skills ADD COLUMN category VARCHAR(50) DEFAULT 'general'",
+                    "instruction_prompt": "ALTER TABLE skills ADD COLUMN instruction_prompt TEXT NOT NULL DEFAULT ''",
+                    "output_format": "ALTER TABLE skills ADD COLUMN output_format TEXT DEFAULT ''",
+                    "examples": "ALTER TABLE skills ADD COLUMN examples JSON DEFAULT '[]'",
+                    "constraints": "ALTER TABLE skills ADD COLUMN constraints JSON DEFAULT '[]'",
+                    "recommended_tools": "ALTER TABLE skills ADD COLUMN recommended_tools JSON DEFAULT '[]'",
+                    "tags": "ALTER TABLE skills ADD COLUMN tags JSON DEFAULT '[]'",
+                }
+                for col, sql in skill_col_migrations.items():
+                    if col not in sk_cols:
+                        await db.execute(sql)
+                        logger.info(f"✅ 自动迁移: 添加 skills.{col}")
+            except Exception:
+                pass
+            logger.info("✅ skills 表就绪")
+
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ 自动迁移跳过: {e}")
+
+
+async def _migrate_null_role_projects():
+    """一次性迁移: 为旧项目设置 project_type + 设置缺少 role_id 的默认值"""
+    from studio.backend.core.database import async_session_maker
+    from sqlalchemy import text
+    try:
+        async with async_session_maker() as db:
+            # 1) 为 role_id=NULL 的旧项目设置默认角色
+            row = (await db.execute(
+                text("SELECT id FROM roles WHERE is_builtin = 1 AND is_enabled = 1 ORDER BY sort_order, id LIMIT 1")
+            )).first()
+            if row:
+                default_id = row[0]
+                result = await db.execute(
+                    text("UPDATE projects SET role_id = :rid WHERE role_id IS NULL"),
+                    {"rid": default_id},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"✅ 迁移 {result.rowcount} 个旧项目 → 默认角色 id={default_id}")
+
+            # 2) 根据已有 role 设置 project_type
+            # Bug 问诊 role → bug, 其余 → requirement
+            bug_row = (await db.execute(
+                text("SELECT id FROM roles WHERE name = 'Bug 问诊' LIMIT 1")
+            )).first()
+            bug_role_id = bug_row[0] if bug_row else -1
+            result2 = await db.execute(
+                text("UPDATE projects SET project_type = 'bug' WHERE role_id = :rid AND (project_type IS NULL OR project_type = 'requirement')"),
+                {"rid": bug_role_id},
+            )
+            if result2.rowcount > 0:
+                logger.info(f"✅ 迁移 {result2.rowcount} 个旧项目 → project_type=bug")
+
+            # 确保所有项目都有 project_type
+            await db.execute(
+                text("UPDATE projects SET project_type = 'requirement' WHERE project_type IS NULL OR project_type = ''")
+            )
+
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ 旧项目迁移跳过: {e}")
+
+
+app = FastAPI(
+    title="设计院 (Studio)",
+    description="AI 驱动的通用项目设计与需求迭代平台",
+    version="1.0.0",
+    docs_url="/studio-api/docs",
+    redoc_url="/studio-api/redoc",
+    openapi_url="/studio-api/openapi.json",
+    lifespan=lifespan,
+)
+
+
+async def _migrate_ask_user_permission():
+    """一次性迁移: 为旧项目的 tool_permissions 添加 ask_user（默认开启）"""
+    from studio.backend.core.database import async_session_maker
+    from sqlalchemy import text
+    import json
+    try:
+        async with async_session_maker() as db:
+            rows = (await db.execute(
+                text("SELECT id, tool_permissions FROM projects")
+            )).fetchall()
+            count = 0
+            for row in rows:
+                pid, raw = row
+                perms = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                if "ask_user" not in perms:
+                    perms.insert(0, "ask_user")
+                    await db.execute(
+                        text("UPDATE projects SET tool_permissions = :val WHERE id = :pid"),
+                        {"val": json.dumps(perms), "pid": pid},
+                    )
+                    count += 1
+            if count > 0:
+                await db.commit()
+                logger.info(f"✅ 迁移 {count} 个旧项目: tool_permissions 添加 ask_user")
+            else:
+                await db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ ask_user 权限迁移跳过: {e}")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 注册路由
+app.include_router(projects_router)
+app.include_router(discussion_router)
+app.include_router(implementation_router)
+app.include_router(deployment_router)
+app.include_router(snapshots_router)
+app.include_router(system_router)
+app.include_router(models_router)
+app.include_router(model_config_router)
+app.include_router(copilot_auth_router)
+app.include_router(studio_auth_router)
+app.include_router(endpoint_probe_router)
+app.include_router(provider_router)
+app.include_router(roles_router)
+app.include_router(skills_router)
+app.include_router(tools_router)
+app.include_router(workflow_module_router)
+app.include_router(workflow_router)
+app.include_router(tasks_project_router)
+app.include_router(tasks_router)
+app.include_router(ws_router)
+app.include_router(users_router)
+app.include_router(command_auth_router)
+
+
+@app.get("/studio-api/health")
+async def health_check():
+    """设计院健康检查"""
+    return {"status": "ok", "service": "studio"}

@@ -1,0 +1,10 @@
+# Studio - 设计院后端
+fastapi>=0.104.0
+uvicorn>=0.24.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+httpx>=0.25.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+tiktoken>=0.7.0
+python-jose[cryptography]>=3.3.0

@@ -34,9 +34,10 @@ const router = createRouter({
           component: () => import('@/views/SnapshotList.vue'),
         },
         {
-          path: 'settings',
+          path: 'settings/:tab?',
           name: 'Settings',
           component: () => import('@/views/Settings.vue'),
+          props: true,
         },
       ],
     },

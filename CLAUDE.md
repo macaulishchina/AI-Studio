@@ -78,7 +78,7 @@ AI-Studio/
 │       ├── github_service.py  # GitHub API 封装
 │       ├── deploy_service.py  # 部署执行服务
 │       ├── snapshot_service.py# 快照管理服务
-│       └── workspace_service.py# 工作区文件操作
+│       └── workspace_service.py# 工作区 VCS 抽象 (Git + SVN 双引擎, 语言统计, 概览缓存)
 │
 └── frontend/                  # Vue 3 前端
     ├── package.json           # npm 依赖
@@ -226,6 +226,11 @@ Docker 中通过 `COPY . ./studio/` + `ENV PYTHONPATH=/app` 实现。
 | `GITHUB_TOKEN`          | GitHub API Token (Models API + 仓库)   | 空                                  |
 | `GITHUB_REPO`           | GitHub 仓库 (owner/repo 格式)          | 空                                  |
 | `GIT_CLONE_URL`         | 通用 Git 仓库克隆 URL (GitLab 等)      | 空                                  |
+| `VCS_TYPE`              | 版本控制类型 (auto / git / svn)         | `auto`                              |
+| `SVN_REPO_URL`          | SVN 仓库 URL                            | 空                                  |
+| `SVN_USERNAME`          | SVN 认证用户名                          | 空                                  |
+| `SVN_PASSWORD`          | SVN 认证密码                            | 空                                  |
+| `SVN_TRUNK_PATH`        | SVN trunk 相对路径                      | `trunk`                             |
 | `STUDIO_ADMIN_USER`     | 管理员用户名                           | `admin`                             |
 | `STUDIO_ADMIN_PASS`     | 管理员密码 (空则自动生成)              | 自动生成                            |
 | `STUDIO_SECRET_KEY`     | JWT 签名密钥 (空则自动生成)            | 自动生成                            |

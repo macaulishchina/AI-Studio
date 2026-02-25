@@ -11,6 +11,7 @@ from sqlalchemy import select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from studio.backend.core.config import settings
 from studio.backend.core.database import get_db
 from studio.backend.core.security import get_optional_studio_user
 from studio.backend.core.project_types import (
@@ -58,6 +59,7 @@ class ProjectCreate(BaseModel):
     description: str = Field("", max_length=5000)
     discussion_model: str = Field("gpt-4o")
     project_type: str = Field(DEFAULT_PROJECT_TYPE)
+    workspace_dir: Optional[str] = Field(None, description="指定工作目录，不传则使用当前活跃工作目录")
 
 
 class ProjectUpdate(BaseModel):
@@ -96,6 +98,8 @@ class ProjectSummary(BaseModel):
     # 角色关联
     role_id: Optional[int] = None
     role: Optional[dict] = None
+    # 绑定的工作目录
+    workspace_dir: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -107,7 +111,6 @@ class ProjectDetail(ProjectSummary):
     review_content: str = ""
     review_version: int = 0
     preview_port: Optional[int] = None
-    workspace_dir: Optional[str] = None
     iteration_count: int = 0
 
 
@@ -128,6 +131,7 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
         project_type=data.project_type,
         status=ProjectStatus.draft,
         created_by=user.get("username", "admin") if user else "admin",
+        workspace_dir=data.workspace_dir or settings.workspace_path,  # 优先使用指定值，否则使用当前活跃工作目录
     )
     db.add(project)
     await db.flush()

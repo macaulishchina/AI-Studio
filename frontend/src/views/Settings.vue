@@ -69,12 +69,19 @@ import ToolSettings from './settings/ToolSettings.vue'
 import WorkflowSettings from './settings/WorkflowSettings.vue'
 import UserManagement from './settings/UserManagement.vue'
 
+const props = defineProps<{ tab?: string }>()
 const authStore = useAuthStore()
 
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value < 768)
 function onResize() { windowWidth.value = window.innerWidth }
-onMounted(() => window.addEventListener('resize', onResize))
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  // 如果 URL 中带了 tab 参数，优先使用
+  if (props.tab && ['ai', 'capabilities', 'system', 'users'].includes(props.tab)) {
+    activeTab.value = props.tab
+  }
+})
 onUnmounted(() => window.removeEventListener('resize', onResize))
 
 // 持久化 tab 状态: 导航切换后保留上次离开的子页面

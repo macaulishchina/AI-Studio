@@ -44,6 +44,22 @@
         </n-breadcrumb>
 
         <n-space align="center" :size="12">
+          <!-- 工作目录快速切换 -->
+          <n-popselect
+            v-model:value="activeWorkspaceId"
+            :options="workspaceOptions"
+            trigger="click"
+            @update:value="handleSwitchWorkspace"
+            :render-label="renderWsLabel"
+          >
+            <n-button size="small" quaternary style="max-width: 220px">
+              <template #icon><span style="font-size: 12px">📂</span></template>
+              <n-ellipsis style="max-width: 160px; font-size: 12px">
+                {{ activeWorkspaceLabel }}
+              </n-ellipsis>
+            </n-button>
+          </n-popselect>
+
           <n-tag :bordered="false" type="success" size="small" round>
             <template #icon><n-icon :component="PulseOutline" /></template>
             运行中
@@ -132,9 +148,10 @@
 <script setup lang="ts">
 import { ref, computed, h, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NIcon } from 'naive-ui'
+import { NIcon, useMessage } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
+import { workspaceDirApi } from '@/api'
 import {
   HomeOutline,
   DocumentTextOutline,
@@ -149,15 +166,84 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const collapsed = ref(false)
+const wsMessage = useMessage()
+
+// ── 工作目录切换 ──────────────────────────────────────────
+const workspaceDirList = ref<any[]>([])
+const activeWorkspaceId = ref<number | null>(null)
+
+const workspaceOptions = computed(() =>
+  workspaceDirList.value.map(d => ({
+    label: d.label || d.path.split(/[\\/]/).pop() || d.path,
+    value: d.id,
+    path: d.path,
+    vcs: d.vcs_type,
+    active: d.is_active,
+  }))
+)
+
+const activeWorkspaceLabel = computed(() => {
+  const active = workspaceDirList.value.find(d => d.is_active)
+  if (active) return active.label || active.path.split(/[\\/]/).pop() || active.path
+  return '选择工作目录'
+})
+
+function renderWsLabel(option: any) {
+  const vcsIcon = option.vcs === 'git' ? '🔀' : option.vcs === 'svn' ? '🔶' : '📁'
+  return h('div', { style: 'display: flex; flex-direction: column; gap: 2px; padding: 2px 0' }, [
+    h('div', { style: 'display: flex; align-items: center; gap: 6px; font-size: 12px' }, [
+      h('span', null, vcsIcon),
+      h('span', { style: option.active ? 'font-weight: bold; color: #63e2b7' : '' }, option.label),
+      option.active ? h('span', { style: 'color: #63e2b7; font-size: 10px' }, ' ●') : null,
+    ]),
+    h('div', { style: 'font-size: 10px; color: rgba(255,255,255,0.35); padding-left: 22px; word-break: break-all' }, option.path),
+  ])
+}
+
+async function fetchWorkspaceDirs() {
+  try {
+    const { data } = await workspaceDirApi.list()
+    workspaceDirList.value = data
+    const active = data.find((d: any) => d.is_active)
+    if (active) activeWorkspaceId.value = active.id
+  } catch {}
+}
+
+async function handleSwitchWorkspace(id: number) {
+  if (!id) return
+  const dir = workspaceDirList.value.find(d => d.id === id)
+  if (!dir || dir.is_active) return
+  try {
+    await workspaceDirApi.activate(id)
+    wsMessage.success(`已切换到: ${dir.label || dir.path}`)
+    await fetchWorkspaceDirs()
+    // 通知其他组件（如 Dashboard）工作目录已切换
+    window.dispatchEvent(new CustomEvent('workspace-switched', { detail: { id, path: dir.path } }))
+  } catch (e: any) {
+    wsMessage.error(e.response?.data?.detail || '切换失败')
+  }
+}
 
 // ── 响应式检测 ──────────────────────────────────────────
 const MOBILE_BREAKPOINT = 768
 const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024)
 const isMobile = computed(() => windowWidth.value < MOBILE_BREAKPOINT)
 
+// 监听其他组件(如 Settings)触发的 workspace-switched 事件，刷新头部状态
+function _onExternalSwitch() {
+  fetchWorkspaceDirs()
+}
+
 function onResize() { windowWidth.value = window.innerWidth }
-onMounted(() => window.addEventListener('resize', onResize))
-onUnmounted(() => window.removeEventListener('resize', onResize))
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  window.addEventListener('workspace-switched', _onExternalSwitch)
+  fetchWorkspaceDirs()
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('workspace-switched', _onExternalSwitch)
+})
 
 // ── 移动端底部 tab 定义 ──────────────────────────────────
 const mobileTabItems = [

@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+setlocal enabledelayedexpansion
 REM ============================================================
 REM  AI-Studio — 仅启动后端 (FastAPI) 开发服务器
 REM ============================================================
@@ -12,6 +13,16 @@ for %%I in ("%PROJECT_ROOT:~0,-1%") do set "FOLDER_NAME=%%~nxI"
 if /I NOT "%FOLDER_NAME%"=="studio" (
     if not exist "%PARENT_DIR%\studio" (
         mklink /J "%PARENT_DIR%\studio" "%PROJECT_ROOT:~0,-1%"
+    )
+)
+
+REM ── 加载 .env 文件 ──
+if exist "%PROJECT_ROOT%.env" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("%PROJECT_ROOT%.env") do (
+        set "_LINE=%%A"
+        if not "%%A"=="" if not "!_LINE:~0,1!"=="#" (
+            set "%%A=%%B"
+        )
     )
 )
 

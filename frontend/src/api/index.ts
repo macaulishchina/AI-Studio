@@ -196,6 +196,23 @@ export const copilotAuthApi = {
 export const systemApi = {
   health: () => api.get('/health'),
   status: () => api.get('/system/status'),
+  workspaceOverview: (forceRefresh = false) =>
+    api.get('/system/workspace-overview', { params: forceRefresh ? { force_refresh: true } : {} }),
+  // GitHub Token / Repo 运行时管理
+  setGithubToken: (token: string) => api.post('/system/github-token', { token }),
+  clearGithubToken: () => api.delete('/system/github-token'),
+  setGithubRepo: (repo: string) => api.post('/system/github-repo', { repo }),
+  clearGithubRepo: () => api.delete('/system/github-repo'),
+}
+
+// ==================== 工作目录管理 ====================
+export const workspaceDirApi = {
+  list: () => api.get('/workspace-dirs'),
+  add: (data: { path: string; label?: string }) => api.post('/workspace-dirs', data),
+  activate: (id: number) => api.post(`/workspace-dirs/${id}/activate`),
+  update: (id: number, data: { label?: string }) => api.patch(`/workspace-dirs/${id}`, data),
+  remove: (id: number) => api.delete(`/workspace-dirs/${id}`),
+  active: () => api.get('/workspace-dirs/active'),
 }
 
 // ==================== 端点探测 ====================

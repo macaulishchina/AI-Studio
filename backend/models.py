@@ -91,6 +91,17 @@ class UserRole(str, enum.Enum):
 
 # ======================== Models ========================
 
+class WorkspaceDir(Base):
+    """工作目录配置 (支持多目录切换)"""
+    __tablename__ = "workspace_dirs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    path = Column(String(500), nullable=False, unique=True)   # 绝对路径
+    label = Column(String(100), default="")                   # 可选标签
+    is_active = Column(Boolean, default=False, nullable=False) # 是否为当前活跃工作区
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class StudioUser(Base):
     """设计院用户 (DB 注册用户)"""
     __tablename__ = "studio_users"

@@ -28,6 +28,7 @@ from studio.backend.api.tasks import project_router as tasks_project_router, tas
 from studio.backend.api.ws import router as ws_router
 from studio.backend.api.users import router as users_router
 from studio.backend.api.command_auth import router as command_auth_router
+from studio.backend.api.workspace_dirs import router as workspace_dirs_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +90,9 @@ async def lifespan(app: FastAPI):
     # 恢复残留的 AI 任务 (服务重启时标记 running→failed)
     from studio.backend.services.task_runner import TaskManager
     await TaskManager.recover_stale_tasks()
+
+    # 同步活跃工作目录: DB 中的活跃目录 → settings.workspace_path
+    await _sync_active_workspace()
 
     yield
     logger.info("🤖 设计院关闭")
@@ -265,6 +269,18 @@ async def _auto_migrate():
                 pass
             logger.info("✅ skills 表就绪")
 
+            # workspace_dirs 表 (工作目录管理)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_dirs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path VARCHAR(500) NOT NULL UNIQUE,
+                    label VARCHAR(100) DEFAULT '',
+                    is_active BOOLEAN DEFAULT 0 NOT NULL,
+                    created_at DATETIME
+                )
+            """)
+            logger.info("✅ workspace_dirs 表就绪")
+
             await db.commit()
     except Exception as e:
         logger.warning(f"⚠️ 自动迁移跳过: {e}")
@@ -352,6 +368,27 @@ async def _migrate_ask_user_permission():
     except Exception as e:
         logger.warning(f"⚠️ ask_user 权限迁移跳过: {e}")
 
+
+async def _sync_active_workspace():
+    """启动时从 DB 同步活跃工作目录到 settings.workspace_path"""
+    from studio.backend.core.database import async_session_maker
+    from sqlalchemy import text
+    try:
+        async with async_session_maker() as db:
+            # 检查 workspace_dirs 表是否存在
+            row = (await db.execute(
+                text("SELECT path FROM workspace_dirs WHERE is_active = 1 LIMIT 1")
+            )).first()
+            if row:
+                settings.workspace_path = row[0]
+                logger.info(f"📂 活跃工作目录 (DB): {row[0]}")
+            else:
+                logger.info(f"📂 活跃工作目录 (ENV): {settings.workspace_path}")
+    except Exception as e:
+        # 表可能不存在 (首次启动), 忽略
+        logger.debug(f"工作目录同步跳过: {e}")
+
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -384,6 +421,7 @@ app.include_router(tasks_router)
 app.include_router(ws_router)
 app.include_router(users_router)
 app.include_router(command_auth_router)
+app.include_router(workspace_dirs_router)
 
 
 @app.get("/studio-api/health")

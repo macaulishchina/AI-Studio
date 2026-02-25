@@ -75,6 +75,15 @@ class StudioSettings:
     # 示例: https://gitlab.example.com/org/repo.git 或 git@gitee.com:org/repo.git
     git_clone_url: str = os.environ.get("GIT_CLONE_URL", "")
 
+    # ── SVN 支持 (可选) ──
+    svn_repo_url: str = os.environ.get("SVN_REPO_URL", "")        # SVN 仓库 URL
+    svn_username: str = os.environ.get("SVN_USERNAME", "")        # SVN 用户名
+    svn_password: str = os.environ.get("SVN_PASSWORD", "")        # SVN 密码
+    svn_trunk_path: str = os.environ.get("SVN_TRUNK_PATH", "trunk")  # trunk 相对路径
+
+    # 版本控制类型: auto (自动检测 .git/.svn) | git | svn | none
+    vcs_type: str = os.environ.get("VCS_TYPE", "auto")
+
     def __post_init__(self):
         self.plans_path = os.path.join(self.data_path, "plans")
         self.db_backups_path = os.path.join(self.data_path, "db-backups")

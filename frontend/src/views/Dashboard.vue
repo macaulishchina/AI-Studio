@@ -15,6 +15,41 @@
         </div>
       </n-card>
 
+      <!-- 当前工作目录概览 (只读信息，切换请用顶栏) -->
+      <n-card size="small" style="background: #16213e; padding: 0">
+        <div class="ws-bar">
+          <div class="ws-bar-left">
+            <span style="font-size: 14px; margin-right: 4px">📁</span>
+            <n-text strong style="font-size: 13px">{{ activeWsLabel }}</n-text>
+            <n-text v-if="activeWsPath" depth="3" style="font-size: 11px; margin-left: 4px">
+              {{ activeWsPath }}
+            </n-text>
+          </div>
+          <div class="ws-bar-right" :class="{ 'ws-stale': wsOverviewStale }">
+            <template v-if="wsOverview">
+              <n-tag v-if="wsOverview.vcs_type && wsOverview.vcs_type !== 'none'" :type="'info'" size="small" :bordered="false">
+                {{ ({'git': 'Git', 'svn': 'SVN'} as Record<string, string>)[wsOverview.vcs_type] || wsOverview.vcs_type }}
+              </n-tag>
+              <n-text v-if="wsOverview.vcs?.branch" code style="font-size: 11px">{{ wsOverview.vcs.branch }}</n-text>
+              <n-ellipsis v-if="wsOverview.vcs?.last_commit_message" :line-clamp="1" style="font-size: 11px; max-width: 280px; opacity: 0.7">
+                {{ wsOverview.vcs.last_commit_message }}
+              </n-ellipsis>
+              <n-tag v-if="wsOverview.uncommitted_count > 0" type="warning" size="small" :bordered="false">
+                {{ wsOverview.uncommitted_count }} 待提交
+              </n-tag>
+              <n-text v-if="wsOverview.contributors?.length" depth="3" style="font-size: 11px">
+                👥 {{ wsOverview.contributors.length }}
+              </n-text>
+              <n-text v-if="wsOverview.total_files" depth="3" style="font-size: 11px">
+                {{ wsOverview.total_files.toLocaleString() }} 文件
+              </n-text>
+              <n-spin v-if="loadingWsOverview" :size="10" style="margin-left: 4px" />
+            </template>
+            <n-spin v-if="loadingWsOverview && !wsOverview" :size="12" />
+          </div>
+        </div>
+      </n-card>
+
       <!-- 统计卡片 -->
       <n-grid :cols="isMobile ? 2 : 4" :x-gap="isMobile ? 8 : 16" :y-gap="isMobile ? 8 : 16">
         <n-gi>
@@ -34,7 +69,7 @@
         </n-gi>
         <n-gi>
           <n-card size="small" style="background: #16213e">
-            <n-statistic label="总项目" :value="projects.length" />
+            <n-statistic label="总项目" :value="wsProjectCount" />
           </n-card>
         </n-gi>
       </n-grid>
@@ -142,6 +177,14 @@
     <!-- 新建项目对话框 -->
     <n-modal v-model:show="showCreate" preset="dialog" :title="createDialogTitle" style="width: 600px; max-width: 95vw">
       <n-form :model="newProject" label-placement="left" label-width="80">
+        <n-form-item label="工作目录">
+          <n-select
+            v-model:value="newProject.workspace_dir"
+            :options="wsDirCreateOptions"
+            placeholder="选择工作目录"
+            style="width: 100%"
+          />
+        </n-form-item>
         <n-form-item label="类型">
           <div class="type-card-grid">
             <div
@@ -197,7 +240,7 @@ import { AddOutline } from '@vicons/ionicons5'
 import LogItem from '@/components/LogItem.vue'
 import { useProjectStore } from '@/stores/project'
 import { useStudioConfigStore } from '@/stores/studioConfig'
-import { snapshotApi, modelApi, projectApi } from '@/api'
+import { snapshotApi, modelApi, projectApi, systemApi, workspaceDirApi } from '@/api'
 import { getProviderIcon } from '@/utils/providerIcons'
 
 const router = useRouter()
@@ -216,6 +259,38 @@ const snapshotCount = ref(0)
 const models = ref<any[]>([])
 const discussFilter = ref('all')
 const projectTypes = ref<any[]>([])
+
+// 工作区概览（轻量，异步独立加载）
+const wsOverview = ref<any>(null)
+const loadingWsOverview = ref(false)
+const wsOverviewStale = ref(true)  // 是否显示的是缓存数据
+
+// 工作目录列表
+const wsDirs = ref<any[]>([])
+const activeWsPath = ref<string>('')
+
+// 当前工作目录显示名 (只取目录名，路径在模板另行显示)
+const activeWsLabel = computed(() => {
+  const active = wsDirs.value.find(d => d.is_active)
+  if (active) return active.label || active.path.split(/[\\/]/).pop() || active.path
+  return '未设置'
+})
+
+// 新建项目的工作目录选择列表
+const wsDirCreateOptions = computed(() =>
+  wsDirs.value.map(d => ({
+    value: d.path,
+    label: (d.label ? `${d.label} — ${d.path}` : d.path) + (d.is_active ? ' ⭐' : ''),
+  }))
+)
+
+// 按当前工作目录筛选项目
+const wsFilteredProjects = computed(() => {
+  if (!activeWsPath.value) return projects.value
+  return projects.value.filter(p => p.workspace_dir === activeWsPath.value)
+})
+
+const wsProjectCount = computed(() => wsFilteredProjects.value.length)
 
 const providerFilters = computed(() => {
   const filters: Array<{value: string; label: string; icon: string}> = [
@@ -244,14 +319,15 @@ const newProject = ref({
   description: '',
   discussion_model: 'gpt-4o',
   project_type: 'requirement',
+  workspace_dir: '',
 })
 
 const projects = computed(() => store.projects)
 const activeCount = computed(() =>
-  projects.value.filter(p => !['deployed', 'closed', 'rolled_back'].includes(p.status)).length
+  wsFilteredProjects.value.filter(p => !['deployed', 'closed', 'rolled_back'].includes(p.status)).length
 )
 const deployedCount = computed(() =>
-  projects.value.filter(p => p.status === 'deployed').length
+  wsFilteredProjects.value.filter(p => p.status === 'deployed').length
 )
 
 // ── 按角色分组，标签筛选 ─────────────────────────────────────────
@@ -479,6 +555,52 @@ function formatDate(dateStr: string) {
   })
 }
 
+// 工作区概览：per-workspace localStorage 缓存 + stale/fresh 状态
+const WS_CACHE_PREFIX = 'studio_ws_overview:'
+function _wsCacheKey() { return WS_CACHE_PREFIX + (activeWsPath.value || '_default') }
+function _saveWsCache(data: any) {
+  try { localStorage.setItem(_wsCacheKey(), JSON.stringify(data)) } catch {}
+}
+function _loadWsCache(): any {
+  try {
+    const raw = localStorage.getItem(_wsCacheKey())
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function loadWsOverview(forceRefresh = false) {
+  // 立即从该工作目录的 localStorage 缓存恢复 (灰色 stale 状态)
+  const cached = _loadWsCache()
+  if (cached) {
+    wsOverview.value = cached
+    wsOverviewStale.value = true  // 灰色: 正在等待后台响应
+  } else {
+    wsOverview.value = null
+    wsOverviewStale.value = false
+  }
+  // 异步加载最新数据
+  loadingWsOverview.value = true
+  systemApi.workspaceOverview(forceRefresh).then(({ data }) => {
+    wsOverview.value = data
+    wsOverviewStale.value = false  // 后台已响应，无论是否缓存都恢复正常
+    _saveWsCache(data)
+  }).catch(() => {}).finally(() => {
+    loadingWsOverview.value = false
+  })
+}
+
+async function loadWorkspaceDirs() {
+  try {
+    const { data } = await workspaceDirApi.list()
+    wsDirs.value = data
+    const active = data.find((d: any) => d.is_active)
+    if (active) {
+      activeWsPath.value = active.path
+      newProject.value.workspace_dir = active.path
+    }
+  } catch {}
+}
+
 async function handleCreate() {
   if (!newProject.value.title.trim()) {
     message.warning('请输入需求标题')
@@ -497,9 +619,16 @@ async function handleCreate() {
   }
 }
 
+// 顶栏切换工作目录时同步刷新
+function _onWorkspaceSwitched() {
+  loadWorkspaceDirs().then(() => loadWsOverview(true))
+}
+
 onMounted(async () => {
   window.addEventListener('resize', _onResize)
+  window.addEventListener('workspace-switched', _onWorkspaceSwitched)
   store.fetchProjects()
+  loadWorkspaceDirs()
   try {
     const { data } = await projectApi.listTypes()
     projectTypes.value = data
@@ -512,10 +641,13 @@ onMounted(async () => {
     const { data } = await modelApi.list({ custom_models: studioConfig.customModelsEnabled })
     models.value = data
   } catch {}
+  // 工作区概览：先显示缓存(灰色)，再异步加载最新数据
+  loadWsOverview()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', _onResize)
+  window.removeEventListener('workspace-switched', _onWorkspaceSwitched)
 })
 </script>
 
@@ -668,6 +800,40 @@ onUnmounted(() => {
 .filter-chip-user.active .chip-avatar {
   background: var(--chip-color, #63e2b7);
   color: #16213e;
+}
+
+/* ── 工作目录概览栏 ──────────────── */
+.ws-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ws-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.ws-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 24px;
+  transition: opacity 0.5s ease, filter 0.5s ease;
+}
+.ws-bar-right.ws-stale {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+@media (max-width: 767px) {
+  .ws-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
 }
 
 /* ── 列表过渡动画 ──────────────── */

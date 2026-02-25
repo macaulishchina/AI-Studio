@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+setlocal enabledelayedexpansion
 REM ============================================================
 REM  AI-Studio — Windows 一键启动开发环境
 REM  同时启动后端 (FastAPI) 和前端 (Vite) 开发服务器
@@ -24,7 +25,17 @@ if /I NOT "%FOLDER_NAME%"=="studio" (
     )
 )
 
-REM ── 环境变量 ──
+REM ── 加载 .env 文件 ──
+if exist "%PROJECT_ROOT%.env" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("%PROJECT_ROOT%.env") do (
+        set "_LINE=%%A"
+        if not "%%A"=="" if not "!_LINE:~0,1!"=="#" (
+            set "%%A=%%B"
+        )
+    )
+)
+
+REM ── 环境变量 (未在 .env 中设置时使用默认值) ──
 set "PYTHONPATH=%PARENT_DIR%"
 if not defined STUDIO_DATA_PATH set "STUDIO_DATA_PATH=%PROJECT_ROOT%dev-data"
 if not defined WORKSPACE_PATH set "WORKSPACE_PATH=%PROJECT_ROOT:~0,-1%"
@@ -41,6 +52,7 @@ if not exist "%STUDIO_DATA_PATH%\uploads" mkdir "%STUDIO_DATA_PATH%\uploads"
 echo   项目目录:   %PROJECT_ROOT:~0,-1%
 echo   PYTHONPATH:  %PYTHONPATH%
 echo   数据目录:    %STUDIO_DATA_PATH%
+echo   工作区:      %WORKSPACE_PATH%
 echo   管理员:      %STUDIO_ADMIN_USER% / %STUDIO_ADMIN_PASS%
 echo.
 echo   后端地址:    http://localhost:8002

@@ -1,6 +1,14 @@
 """
 设计院 (Studio) - 代码实施 API
 创建 GitHub Issue → 分配 Copilot Coding Agent → 监控 PR
+
+实施流程 (两步法, 对齐官方文档):
+  Step 1: 创建 GitHub Issue (不含 assignee)
+  Step 2: POST /issues/{n}/assignees 分配 copilot-swe-agent[bot] + agent_assignment
+  → Copilot 自动创建 copilot/* 分支和 Draft PR
+
+参考:
+  https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/create-a-pr
 """
 import asyncio
 import logging
@@ -8,6 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+import httpx
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +60,7 @@ class ImplementRequest(BaseModel):
     """发起实施请求"""
     custom_instructions: str = ""
     base_branch: str = "main"
+    model: str = ""  # AI 模型选择 (空=Auto)
 
 
 class ImplementationStatus(BaseModel):
@@ -69,6 +79,81 @@ class ImplementationStatus(BaseModel):
     workflow_conclusion: Optional[str] = None  # success, failure, cancelled
     workflow_url: Optional[str] = None
     workflow_name: Optional[str] = None
+    # 会话追踪
+    session_url: str = "https://github.com/copilot/agents"
+    issue_url: Optional[str] = None
+    copilot_assigned: bool = False
+
+
+# ==================== 预检 ====================
+
+
+@router.get("/{project_id}/preflight")
+async def preflight_check(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    发起实施前的预检:
+    1. 验证 GitHub Token 权限
+    2. 检查 Copilot Coding Agent 是否可用
+    3. 获取仓库默认分支等信息
+    """
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
+
+    # 并行检查权限和 Copilot 可用性
+    perm_result, copilot_result = await asyncio.gather(
+        github_service.check_token_permissions(repo=repo, token=token),
+        github_service.check_copilot_available(repo=repo, token=token),
+    )
+
+    # 构建检查项列表
+    checks = []
+
+    checks.append({
+        "name": "仓库访问",
+        "passed": perm_result["repo_access"],
+        "detail": f"仓库: {repo}" if perm_result["repo_access"] else "无法访问仓库",
+    })
+    checks.append({
+        "name": "Issues 写入权限",
+        "passed": perm_result["issues_write"],
+        "detail": "已授权" if perm_result["issues_write"] else "Token 缺少 Issues 写入权限",
+    })
+    checks.append({
+        "name": "Actions 读取权限",
+        "passed": perm_result["actions_read"],
+        "detail": "已授权" if perm_result["actions_read"] else "Token 缺少 Actions 读取权限 (影响状态监控)",
+    })
+    checks.append({
+        "name": "Issues 已启用",
+        "passed": perm_result.get("has_issues", False),
+        "detail": "仓库已启用 Issues" if perm_result.get("has_issues") else "仓库未启用 Issues",
+    })
+    checks.append({
+        "name": "Copilot Coding Agent",
+        "passed": copilot_result["available"],
+        "detail": copilot_result["message"],
+    })
+
+    all_passed = all(c["passed"] for c in checks)
+
+    return {
+        "ready": all_passed,
+        "checks": checks,
+        "default_branch": perm_result.get("default_branch", "main"),
+        "repo": repo,
+        "errors": perm_result.get("errors", []),
+    }
+
+
+# ==================== 发起实施 ====================
 
 
 @router.post("/{project_id}/implement")
@@ -78,10 +163,12 @@ async def start_implementation(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    发起代码实施:
-    1. 创建 GitHub Issue (含设计方案)
-    2. 分配 copilot-swe-agent[bot] + agent_assignment, 触发 Copilot Coding Agent
-    3. Agent 自动创建 copilot/ 分支和 Draft PR
+    发起代码实施 (两步法, 对齐官方 REST API 文档):
+
+    Step 1: 创建 GitHub Issue (不含 assignee)
+    Step 2: POST /issues/{n}/assignees 分配 copilot-swe-agent[bot]
+            附带完整的 agent_assignment (target_repo, base_branch, custom_instructions, custom_agent, model)
+    → Copilot 自动创建 copilot/* 分支和 Draft PR
     """
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -94,7 +181,7 @@ async def start_implementation(
     if not project.plan_content:
         raise HTTPException(status_code=400, detail="请先敲定设计方案 (plan)")
 
-    # 构建 Issue body
+    # ── 构建 Issue body ──
     issue_body = f"""## 设计院需求 #{project.id}: {project.title}
 
 ### 需求描述
@@ -110,39 +197,176 @@ async def start_implementation(
     if data.custom_instructions:
         issue_body += f"\n### 附加指令\n{data.custom_instructions}\n"
 
-    # 构建 agent_assignment
-    agent_assignment = {
-        "target_repo": repo,
-        "base_branch": data.base_branch,
-    }
-    if data.custom_instructions:
-        agent_assignment["custom_instructions"] = data.custom_instructions
-
     try:
+        # ── Step 1: 创建 Issue (不含 assignee) ──
+        logger.info(f"[实施] 项目 {project_id}: 创建 Issue...")
         issue = await github_service.create_issue(
             title=f"[设计院] {project.title}",
             body=issue_body,
             labels=["studio"],
-            assignees=["copilot-swe-agent[bot]"],
-            agent_assignment=agent_assignment,
             repo=repo,
             token=token,
         )
+        issue_number = issue["number"]
+        logger.info(f"[实施] 项目 {project_id}: Issue #{issue_number} 已创建")
 
-        project.github_issue_number = issue["number"]
+        # ── Step 2: 分配 Copilot Coding Agent ──
+        logger.info(f"[实施] 项目 {project_id}: 分配 copilot-swe-agent[bot] 到 Issue #{issue_number}...")
+        try:
+            assign_result = await github_service.assign_copilot_to_issue(
+                issue_number=issue_number,
+                target_repo=repo,
+                base_branch=data.base_branch,
+                custom_instructions=data.custom_instructions,
+                model=data.model,
+                repo=repo,
+                token=token,
+            )
+
+            # 验证分配是否成功
+            assignees = assign_result.get("assignees", [])
+            copilot_ok = any(
+                "copilot-swe-agent" in a.get("login", "") for a in assignees
+            )
+        except httpx.HTTPStatusError as assign_err:
+            status_code = assign_err.response.status_code if assign_err.response else 500
+            raw = (assign_err.response.text or "")[:500] if assign_err.response else str(assign_err)
+            logger.error(f"[实施] 分配 Agent 失败 (HTTP {status_code}): {raw}")
+
+            # Issue 已创建但分配失败 — 保存 Issue 信息并返回详细错误
+            project.github_issue_number = issue_number
+            project.updated_at = datetime.utcnow()
+
+            detail = (
+                f"Issue #{issue_number} 已创建, 但分配 Copilot Agent 失败 (HTTP {status_code})。\n"
+            )
+            if status_code == 403:
+                detail += (
+                    "可能的原因:\n"
+                    "• Token 缺少 Issues 或 Pull Requests 的 Read & Write 权限\n"
+                    "• 仓库 Ruleset 阻止了 Bot 的分配\n"
+                    "• Copilot Coding Agent 未在此仓库启用\n"
+                )
+            elif status_code == 422:
+                detail += (
+                    "可能的原因:\n"
+                    "• copilot-swe-agent[bot] 不可用 (Copilot 未启用或订阅不支持)\n"
+                    "• agent_assignment 参数格式错误\n"
+                )
+            detail += f"\n你可以手动在 GitHub 上将 Issue #{issue_number} 分配给 Copilot。\n"
+            detail += f"GitHub 返回: {raw}"
+            raise HTTPException(status_code=502, detail=detail)
+
+        project.github_issue_number = issue_number
         project.status = ProjectStatus.implementing
         project.updated_at = datetime.utcnow()
 
-        return {
+        response = {
             "success": True,
-            "issue_number": issue["number"],
+            "issue_number": issue_number,
             "issue_url": issue["html_url"],
-            "message": "任务已创建，Copilot Coding Agent 将自动开始编码",
+            "copilot_assigned": copilot_ok,
+            "session_url": "https://github.com/copilot/agents",
+            "message": "任务已创建并分配给 Copilot Coding Agent" if copilot_ok
+                       else f"Issue #{issue_number} 已创建, 但 Copilot 可能未成功分配。请在 GitHub 上检查 Issue 的 assignees。",
         }
+        if not copilot_ok:
+            response["warning"] = (
+                "copilot-swe-agent[bot] 未在 assignees 列表中。"
+                "可能的原因: Copilot 不可用或权限不足。"
+                f"请访问 {issue['html_url']} 手动检查。"
+            )
+        return response
 
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code if e.response is not None else 500
+        raw_text = (e.response.text or "")[:300] if e.response is not None else str(e)
+        gh_message = ""
+        if e.response is not None:
+            try:
+                gh_message = (e.response.json() or {}).get("message", "")
+            except Exception:
+                gh_message = ""
+
+        if status_code == 403:
+            detail = (
+                "GitHub 权限不足（403）。请检查：\n"
+                "1) Token 是否对仓库有写入权限\n"
+                "2) Fine-grained PAT 需要: metadata(R), actions(RW), contents(RW), issues(RW), pull_requests(RW)\n"
+                "3) 仓库是否开启了 Issues\n"
+                "4) 仓库 Ruleset 是否允许 Bot 操作\n"
+                f"目标仓库: {repo}\n"
+                f"GitHub 返回: {gh_message or raw_text}"
+            )
+            raise HTTPException(status_code=403, detail=detail)
+
+        if status_code == 404:
+            detail = (
+                "GitHub 资源不存在（404）。请检查 owner/repo 配置是否正确，"
+                f"并确认 Token 有访问该仓库的权限。\n"
+                f"目标仓库: {repo}\n"
+                f"GitHub 返回: {gh_message or raw_text}"
+            )
+            raise HTTPException(status_code=404, detail=detail)
+
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub API 调用失败 (HTTP {status_code}): {gh_message or raw_text}",
+        )
     except Exception as e:
         logger.exception("创建 GitHub Issue 失败")
         raise HTTPException(status_code=500, detail=f"GitHub API 错误: {str(e)}")
+
+
+# ==================== 会话监控 ====================
+
+
+@router.get("/{project_id}/session")
+async def get_copilot_session(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取 Copilot Coding Agent 会话信息。
+    包含:
+    - 会话追踪 URL (GitHub Agents 页面)
+    - Issue/PR 状态
+    - Copilot 是否成功分配
+    - 分支信息
+    """
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
+
+    if not project.github_issue_number:
+        return {
+            "has_session": False,
+            "message": "尚未发起实施",
+            "session_url": "https://github.com/copilot/agents",
+        }
+
+    session_info = await github_service.get_issue_copilot_session_info(
+        issue_number=project.github_issue_number,
+        repo=repo,
+        token=token,
+    )
+
+    # 同步 PR 信息到项目
+    if session_info.get("pr_number") and not project.github_pr_number:
+        project.github_pr_number = session_info["pr_number"]
+        project.branch_name = session_info.get("branch")
+        project.updated_at = datetime.utcnow()
+
+    return {
+        "has_session": True,
+        **session_info,
+    }
 
 
 @router.get("/{project_id}/implementation", response_model=ImplementationStatus)
@@ -165,6 +389,8 @@ async def get_implementation_status(
         github_issue_number=project.github_issue_number,
         github_pr_number=project.github_pr_number,
         branch_name=project.branch_name,
+        session_url="https://github.com/copilot/agents",
+        issue_url=f"https://github.com/{repo}/issues/{project.github_issue_number}" if project.github_issue_number else None,
     )
 
     if not project.github_issue_number:
@@ -173,6 +399,18 @@ async def get_implementation_status(
     status_info.status = "task_created"
 
     try:
+        # ---- Step 0: 检查 Copilot 是否被成功分配 ----
+        try:
+            issue_data = await github_service.get_issue(
+                project.github_issue_number, repo=repo, token=token
+            )
+            assignees = issue_data.get("assignees", [])
+            status_info.copilot_assigned = any(
+                "copilot-swe-agent" in a.get("login", "") for a in assignees
+            )
+        except Exception:
+            pass
+
         # ---- Step 1: 查找关联 PR (如果还没有记录) ----
         if not project.github_pr_number:
             pulls = await github_service.list_pulls(state="all", repo=repo, token=token)

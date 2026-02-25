@@ -115,8 +115,15 @@ export const discussionApi = {
 
 // ==================== 实施 ====================
 export const implementationApi = {
+  // 预检: 检查 Token 权限和 Copilot 可用性
+  preflight: (projectId: number) => api.get(`/projects/${projectId}/preflight`),
+  // 发起实施 (两步法: 创建 Issue → 分配 Agent)
   start: (projectId: number, data: any) => api.post(`/projects/${projectId}/implement`, data),
+  // 查询实施状态 (含 workflow + PR)
   getStatus: (projectId: number) => api.get(`/projects/${projectId}/implementation`),
+  // 查询 Copilot 会话信息
+  getSession: (projectId: number) => api.get(`/projects/${projectId}/session`),
+  // 获取 PR diff
   getDiff: (projectId: number) => api.get(`/projects/${projectId}/pr-diff`),
   approvePR: (projectId: number) => api.post(`/projects/${projectId}/pr/approve`),
   prepareReview: (projectId: number) => api.post(`/projects/${projectId}/prepare-review`),

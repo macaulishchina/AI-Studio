@@ -1,5 +1,25 @@
 <template>
   <div>
+    <!-- 预检面板 -->
+    <n-card v-if="preflightResult && !preflightResult.ready" style="background: #16213e; margin-bottom: 16px">
+      <template #header>
+        <n-space align="center" :size="8">
+          <span>⚠️ 预检未通过</span>
+          <n-button size="tiny" @click="runPreflight" :loading="preflighting" quaternary>重新检查</n-button>
+        </n-space>
+      </template>
+      <n-space vertical :size="6">
+        <div v-for="c in preflightResult.checks" :key="c.name" style="display: flex; align-items: center; gap: 8px; font-size: 13px">
+          <span>{{ c.passed ? '✅' : '❌' }}</span>
+          <b>{{ c.name }}</b>
+          <n-text depth="3" style="font-size: 12px">{{ c.detail }}</n-text>
+        </div>
+        <n-alert v-if="preflightResult.errors?.length" type="warning" :bordered="false" style="margin-top: 8px">
+          <div v-for="(e, i) in preflightResult.errors" :key="i" style="font-size: 12px">{{ e }}</div>
+        </n-alert>
+      </n-space>
+    </n-card>
+
     <!-- 实施控制 -->
     <n-card style="background: #16213e; margin-bottom: 16px">
       <n-space vertical :size="12">
@@ -17,8 +37,7 @@
             </template>
             <div style="max-width: 280px; font-size: 12px">
               <b>基础分支</b>: Copilot Agent 将基于此分支创建 PR。<br>
-              通常为 <code>main</code> 或 <code>master</code>。<br>
-              如需基于其他 feature 分支开发，可在此修改。
+              通常为 <code>main</code> 或 <code>master</code>。
             </div>
           </n-tooltip>
           <n-button
@@ -31,6 +50,18 @@
           </n-button>
           <n-button @click="refreshStatus" :loading="polling" size="small">
             🔄 刷新状态
+          </n-button>
+          <!-- 会话追踪链接 -->
+          <n-button
+            v-if="implStatus?.github_issue_number"
+            text
+            tag="a"
+            href="https://github.com/copilot/agents"
+            target="_blank"
+            size="small"
+            type="info"
+          >
+            📡 查看 Agent 会话
           </n-button>
         </n-space>
         <n-input
@@ -57,7 +88,15 @@
     <n-card v-if="implStatus" style="background: #16213e; margin-bottom: 16px">
       <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" bordered size="small">
         <n-descriptions-item label="状态">
-          <n-tag :type="implStatusType" size="small">{{ implStatusText }}</n-tag>
+          <n-space align="center" :size="6">
+            <n-tag :type="implStatusType" size="small">{{ implStatusText }}</n-tag>
+            <n-tag v-if="implStatus.copilot_assigned" type="success" size="small" :bordered="false">
+              🤖 Agent 已分配
+            </n-tag>
+            <n-tag v-else-if="implStatus.github_issue_number && implStatus.status !== 'not_started'" type="warning" size="small" :bordered="false">
+              ⚠️ Agent 未分配
+            </n-tag>
+          </n-space>
         </n-descriptions-item>
         <n-descriptions-item label="Issue" v-if="implStatus.github_issue_number && repoName">
           <n-button text tag="a" :href="`https://github.com/${repoName}/issues/${implStatus.github_issue_number}`" target="_blank">
@@ -94,6 +133,82 @@
           {{ implStatus.pr_files_changed }} 个文件
         </n-descriptions-item>
       </n-descriptions>
+
+      <!-- Agent 未分配警告 + 手动重试 -->
+      <n-alert
+        v-if="implStatus.github_issue_number && !implStatus.copilot_assigned && implStatus.status !== 'not_started' && implStatus.status !== 'agent_working' && implStatus.status !== 'agent_done'"
+        type="warning"
+        style="margin-top: 12px"
+        :bordered="false"
+      >
+        <template #header>Copilot Agent 未成功分配</template>
+        <div style="font-size: 12px">
+          Issue 已创建但 Copilot 未被分配。可能原因:
+          <ul style="margin: 4px 0; padding-left: 20px">
+            <li>Copilot Coding Agent 未在仓库中启用</li>
+            <li>Token 权限不足 (需要 Issues + Pull Requests 的 Read &amp; Write)</li>
+            <li>仓库 Ruleset 限制了 Bot 操作</li>
+          </ul>
+          <n-space :size="8" style="margin-top: 8px">
+            <n-button
+              size="small"
+              type="primary"
+              tag="a"
+              :href="implStatus.issue_url || `https://github.com/${repoName}/issues/${implStatus.github_issue_number}`"
+              target="_blank"
+            >
+              在 GitHub 上手动分配
+            </n-button>
+            <n-button size="small" @click="refreshStatus">
+              🔄 重新检查
+            </n-button>
+          </n-space>
+        </div>
+      </n-alert>
+    </n-card>
+
+    <!-- 编码过程查看器 (session 信息) -->
+    <n-card
+      v-if="sessionInfo && sessionInfo.has_session"
+      style="background: #16213e; margin-bottom: 16px"
+    >
+      <template #header>
+        <n-space align="center" :size="8">
+          <span>📡 编码过程</span>
+          <n-button size="tiny" @click="loadSession" :loading="loadingSession" quaternary>刷新</n-button>
+        </n-space>
+      </template>
+      <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" bordered size="small">
+        <n-descriptions-item label="Copilot 状态">
+          <n-tag :type="sessionStatusType" size="small">{{ sessionStatusText }}</n-tag>
+        </n-descriptions-item>
+        <n-descriptions-item label="Agent 会话">
+          <n-button text tag="a" :href="sessionInfo.session_url" target="_blank" type="info" size="small">
+            在 GitHub 上查看会话日志 →
+          </n-button>
+        </n-descriptions-item>
+        <n-descriptions-item label="Issue" v-if="sessionInfo.issue_url">
+          <n-button text tag="a" :href="sessionInfo.issue_url" target="_blank" size="small">
+            #{{ sessionInfo.issue_number }} →
+          </n-button>
+        </n-descriptions-item>
+        <n-descriptions-item label="PR" v-if="sessionInfo.pr_url">
+          <n-button text tag="a" :href="sessionInfo.pr_url" target="_blank" size="small">
+            #{{ sessionInfo.pr_number }} →
+          </n-button>
+        </n-descriptions-item>
+        <n-descriptions-item label="分支" v-if="sessionInfo.branch">
+          <n-tag size="small" :bordered="false">{{ sessionInfo.branch }}</n-tag>
+        </n-descriptions-item>
+      </n-descriptions>
+      <n-alert type="info" :bordered="false" style="margin-top: 12px; font-size: 12px">
+        💡 可以在
+        <n-button text tag="a" href="https://github.com/copilot/agents" target="_blank" size="small" type="info">
+          GitHub Agents 页面
+        </n-button>
+        查看 Copilot 的内部思考过程、使用的工具和实时日志。
+        PR 创建后也可以在 PR 页面查看 Session Log。
+      </n-alert>
     </n-card>
 
     <!-- Agent 完成提示 -->
@@ -106,6 +221,16 @@
             </n-button>
             <n-button v-if="implStatus?.github_pr_number" @click="loadDiff" :loading="loadingDiff" quaternary>
               📝 查看 Diff
+            </n-button>
+            <n-button
+              v-if="implStatus?.pr_url"
+              text
+              tag="a"
+              :href="implStatus.pr_url"
+              target="_blank"
+              type="info"
+            >
+              在 GitHub 上查看 PR →
             </n-button>
           </n-space>
         </template>
@@ -162,6 +287,58 @@ const diffData = ref<any>(null)
 let pollTimer: any = null
 
 const repoName = ref('')
+
+// ── 预检 ─────────────────────────────────────────────────────
+const preflightResult = ref<any>(null)
+const preflighting = ref(false)
+
+async function runPreflight() {
+  preflighting.value = true
+  try {
+    const { data } = await implementationApi.preflight(props.project.id)
+    preflightResult.value = data
+    if (data.default_branch) {
+      baseBranch.value = data.default_branch
+    }
+  } catch (e: any) {
+    // 预检失败不阻断, 仅记录
+    console.warn('预检失败:', e)
+  } finally {
+    preflighting.value = false
+  }
+}
+
+// ── 会话监控 ──────────────────────────────────────────────────
+const sessionInfo = ref<any>(null)
+const loadingSession = ref(false)
+
+async function loadSession() {
+  loadingSession.value = true
+  try {
+    const { data } = await implementationApi.getSession(props.project.id)
+    sessionInfo.value = data
+  } catch {
+    // ignore
+  } finally {
+    loadingSession.value = false
+  }
+}
+
+const sessionStatusType = computed(() => {
+  const m: Record<string, any> = {
+    unknown: 'default', assigned: 'info', working: 'warning',
+    completed: 'success', merged: 'success', failed: 'error',
+  }
+  return m[sessionInfo.value?.copilot_status] || 'default'
+})
+
+const sessionStatusText = computed(() => {
+  const m: Record<string, string> = {
+    unknown: '未知', assigned: '已分配 Agent', working: 'Agent 编码中',
+    completed: '编码完成', merged: 'PR 已合并', failed: '失败',
+  }
+  return m[sessionInfo.value?.copilot_status] || sessionInfo.value?.copilot_status || ''
+})
 
 // ── 状态计算 ──────────────────────────────────────────────────
 
@@ -256,23 +433,41 @@ async function refreshStatus() {
     if (data.status === 'agent_done' && prevStatus !== 'agent_done') {
       emit('status-changed')
     }
+    // 同时加载会话信息
+    if (data.github_issue_number) {
+      loadSession()
+    }
   } catch {}
   finally { polling.value = false }
 }
 
 async function handleStartImplementation() {
+  // 先运行预检
+  if (!preflightResult.value) {
+    await runPreflight()
+    if (preflightResult.value && !preflightResult.value.ready) {
+      message.warning('预检未通过, 请检查上方的检查项')
+      return
+    }
+  }
+
   starting.value = true
   try {
     const { data } = await implementationApi.start(props.project.id, {
       custom_instructions: customInstructions.value,
       base_branch: baseBranch.value,
     })
-    message.success(data.message)
+    if (data.warning) {
+      message.warning(data.warning, { duration: 8000 })
+    } else {
+      message.success(data.message)
+    }
     emit('status-changed')
     startPolling()
     refreshStatus()
   } catch (e: any) {
-    message.error(e.response?.data?.detail || '发起实施失败')
+    const detail = e.response?.data?.detail || '发起实施失败'
+    message.error(detail, { duration: 10000 })
   } finally {
     starting.value = false
   }
@@ -305,7 +500,7 @@ function startPolling() {
     } else {
       stopPolling()
     }
-  }, 15000) // 15秒轮询, 更快响应 workflow 变化
+  }, 15000) // 15秒轮询
 }
 
 function stopPolling() {
@@ -324,6 +519,10 @@ onMounted(async () => {
   const s = implStatus.value?.status
   if (s === 'agent_working' || s === 'task_created') {
     startPolling()
+  }
+  // 未开始时自动运行预检
+  if (!s || s === 'not_started') {
+    runPreflight()
   }
 })
 

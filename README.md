@@ -75,23 +75,19 @@ cd frontend && npm install && cd ..
 
 # 3. 设置环境变量 (关键: PYTHONPATH)
 #    项目使用 studio.backend.xxx 导入路径
-#    PYTHONPATH 需要指向项目的 "父目录"
-#    如果项目文件夹名不是 "studio"，需创建链接:
+#    直接将 PYTHONPATH 指向项目根目录即可
 
 # Windows (CMD):
-mklink /J ..\studio .
-set PYTHONPATH=..
+set PYTHONPATH=.
 set STUDIO_DATA_PATH=./dev-data
 set STUDIO_ADMIN_PASS=admin123
 
 # Linux/macOS:
-ln -s "$(pwd)" ../studio
-export PYTHONPATH=..
+export PYTHONPATH=.
 export STUDIO_DATA_PATH=./dev-data
 export STUDIO_ADMIN_PASS=admin123
 
 # 4. 启动后端
-cd ..
 uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload
 
 # 5. 启动前端 (新终端)
@@ -206,9 +202,8 @@ from studio.backend.core.config import settings
 from studio.backend.models import Project
 ```
 
-这要求 `PYTHONPATH` 指向包含 `studio/` 目录的父目录。开发脚本会自动处理:
-- 如果项目文件夹名为 `studio` → 直接以父目录作为 PYTHONPATH
-- 如果项目文件夹名不是 `studio` → 自动在父目录创建 `studio` 链接 (Windows: junction, Linux: symlink)
+项目已内置 `studio/backend` 桥接包，`studio.backend.*` 会映射到项目根下的 `backend/` 目录。
+因此只需将 `PYTHONPATH` 设为项目根（或在项目根目录执行启动命令）即可，无需再创建外部链接。
 
 ### 数据库
 

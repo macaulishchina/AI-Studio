@@ -14,16 +14,18 @@ logger = logging.getLogger(__name__)
 GITHUB_API = "https://api.github.com"
 
 
-def _headers() -> Dict[str, str]:
+def _headers(token: Optional[str] = None) -> Dict[str, str]:
+    auth_token = (token if token is not None else settings.github_token) or ""
     return {
-        "Authorization": f"Bearer {settings.github_token}",
+        "Authorization": f"Bearer {auth_token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
 
-def _repo_url(path: str = "") -> str:
-    return f"{GITHUB_API}/repos/{settings.github_repo}{path}"
+def _repo_url(path: str = "", repo: Optional[str] = None) -> str:
+    target_repo = (repo if repo is not None else settings.github_repo) or ""
+    return f"{GITHUB_API}/repos/{target_repo}{path}"
 
 
 async def create_issue(
@@ -32,6 +34,8 @@ async def create_issue(
     labels: Optional[List[str]] = None,
     assignees: Optional[List[str]] = None,
     agent_assignment: Optional[Dict[str, Any]] = None,
+    repo: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """创建 GitHub Issue (可附带 Copilot agent_assignment)"""
     payload: Dict[str, Any] = {"title": title, "body": body}
@@ -43,7 +47,7 @@ async def create_issue(
         payload["agent_assignment"] = agent_assignment
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(_repo_url("/issues"), headers=_headers(), json=payload)
+        resp = await client.post(_repo_url("/issues", repo=repo), headers=_headers(token), json=payload)
         resp.raise_for_status()
         return resp.json()
 
@@ -51,6 +55,8 @@ async def create_issue(
 async def assign_issue_to_copilot(
     issue_number: int,
     agent_assignment: Optional[Dict[str, Any]] = None,
+    repo: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """将已有 Issue 分配给 Copilot Coding Agent"""
     payload: Dict[str, Any] = {
@@ -61,66 +67,67 @@ async def assign_issue_to_copilot(
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            _repo_url(f"/issues/{issue_number}/assignees"),
-            headers=_headers(),
+            _repo_url(f"/issues/{issue_number}/assignees", repo=repo),
+            headers=_headers(token),
             json=payload,
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def get_issue(issue_number: int) -> Dict[str, Any]:
+async def get_issue(issue_number: int, repo: Optional[str] = None, token: Optional[str] = None) -> Dict[str, Any]:
     """获取 Issue 详情"""
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(_repo_url(f"/issues/{issue_number}"), headers=_headers())
+        resp = await client.get(_repo_url(f"/issues/{issue_number}", repo=repo), headers=_headers(token))
         resp.raise_for_status()
         return resp.json()
 
 
-async def update_issue(issue_number: int, **kwargs) -> Dict[str, Any]:
+async def update_issue(issue_number: int, repo: Optional[str] = None, token: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """更新 Issue"""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.patch(
-            _repo_url(f"/issues/{issue_number}"), headers=_headers(), json=kwargs
+            _repo_url(f"/issues/{issue_number}", repo=repo), headers=_headers(token), json=kwargs
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def list_pulls(state: str = "open", head: Optional[str] = None) -> List[Dict[str, Any]]:
+async def list_pulls(state: str = "open", head: Optional[str] = None, repo: Optional[str] = None, token: Optional[str] = None) -> List[Dict[str, Any]]:
     """列出 PR"""
     params: Dict[str, str] = {"state": state, "per_page": "30"}
+    target_repo = (repo if repo is not None else settings.github_repo) or ""
     if head:
         # head 格式: owner:branch
-        params["head"] = f"{settings.github_repo.split('/')[0]}:{head}"
+        params["head"] = f"{target_repo.split('/')[0]}:{head}"
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(_repo_url("/pulls"), headers=_headers(), params=params)
+        resp = await client.get(_repo_url("/pulls", repo=target_repo), headers=_headers(token), params=params)
         resp.raise_for_status()
         return resp.json()
 
 
-async def get_pull(pr_number: int) -> Dict[str, Any]:
+async def get_pull(pr_number: int, repo: Optional[str] = None, token: Optional[str] = None) -> Dict[str, Any]:
     """获取 PR 详情"""
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(_repo_url(f"/pulls/{pr_number}"), headers=_headers())
+        resp = await client.get(_repo_url(f"/pulls/{pr_number}", repo=repo), headers=_headers(token))
         resp.raise_for_status()
         return resp.json()
 
 
-async def get_pull_diff(pr_number: int) -> str:
+async def get_pull_diff(pr_number: int, repo: Optional[str] = None, token: Optional[str] = None) -> str:
     """获取 PR diff"""
-    headers = {**_headers(), "Accept": "application/vnd.github.v3.diff"}
+    headers = {**_headers(token), "Accept": "application/vnd.github.v3.diff"}
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(_repo_url(f"/pulls/{pr_number}"), headers=headers)
+        resp = await client.get(_repo_url(f"/pulls/{pr_number}", repo=repo), headers=headers)
         resp.raise_for_status()
         return resp.text
 
 
-async def get_pull_files(pr_number: int) -> List[Dict[str, Any]]:
+async def get_pull_files(pr_number: int, repo: Optional[str] = None, token: Optional[str] = None) -> List[Dict[str, Any]]:
     """获取 PR 变更的文件列表"""
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(_repo_url(f"/pulls/{pr_number}/files"), headers=_headers())
+        resp = await client.get(_repo_url(f"/pulls/{pr_number}/files", repo=repo), headers=_headers(token))
         resp.raise_for_status()
         return resp.json()
 
@@ -129,6 +136,8 @@ async def merge_pull(
     pr_number: int,
     merge_method: str = "squash",
     commit_message: Optional[str] = None,
+    repo: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """合并 PR"""
     payload: Dict[str, Any] = {"merge_method": merge_method}
@@ -137,58 +146,58 @@ async def merge_pull(
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.put(
-            _repo_url(f"/pulls/{pr_number}/merge"), headers=_headers(), json=payload
+            _repo_url(f"/pulls/{pr_number}/merge", repo=repo), headers=_headers(token), json=payload
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def create_branch(branch_name: str, from_ref: str = "master") -> Dict[str, Any]:
+async def create_branch(branch_name: str, from_ref: str = "master", repo: Optional[str] = None, token: Optional[str] = None) -> Dict[str, Any]:
     """创建分支"""
     # 先获取 from_ref 的 SHA
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            _repo_url(f"/git/ref/heads/{from_ref}"), headers=_headers()
+            _repo_url(f"/git/ref/heads/{from_ref}", repo=repo), headers=_headers(token)
         )
         resp.raise_for_status()
         sha = resp.json()["object"]["sha"]
 
         # 创建新分支
         resp = await client.post(
-            _repo_url("/git/refs"),
-            headers=_headers(),
+            _repo_url("/git/refs", repo=repo),
+            headers=_headers(token),
             json={"ref": f"refs/heads/{branch_name}", "sha": sha},
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def delete_branch(branch_name: str) -> bool:
+async def delete_branch(branch_name: str, repo: Optional[str] = None, token: Optional[str] = None) -> bool:
     """删除分支"""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.delete(
-            _repo_url(f"/git/refs/heads/{branch_name}"), headers=_headers()
+            _repo_url(f"/git/refs/heads/{branch_name}", repo=repo), headers=_headers(token)
         )
         return resp.status_code == 204
 
 
-async def get_repo_info() -> Dict[str, Any]:
+async def get_repo_info(repo: Optional[str] = None, token: Optional[str] = None) -> Dict[str, Any]:
     """获取仓库信息"""
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(_repo_url(), headers=_headers())
+        resp = await client.get(_repo_url(repo=repo), headers=_headers(token))
         resp.raise_for_status()
         return resp.json()
 
 
-async def check_connection() -> Dict[str, Any]:
+async def check_connection(repo: Optional[str] = None, token: Optional[str] = None) -> Dict[str, Any]:
     """检查 GitHub 连接状态"""
     try:
-        repo = await get_repo_info()
+        repo_info = await get_repo_info(repo=repo, token=token)
         return {
             "connected": True,
-            "repo": repo.get("full_name"),
-            "default_branch": repo.get("default_branch"),
-            "private": repo.get("private"),
+            "repo": repo_info.get("full_name"),
+            "default_branch": repo_info.get("default_branch"),
+            "private": repo_info.get("private"),
         }
     except Exception as e:
         return {"connected": False, "error": str(e)}
@@ -201,6 +210,8 @@ async def list_workflow_runs(
     event: Optional[str] = None,
     status: Optional[str] = None,
     per_page: int = 10,
+    repo: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """列出 GitHub Actions workflow runs"""
     params: Dict[str, str] = {"per_page": str(per_page)}
@@ -213,30 +224,30 @@ async def list_workflow_runs(
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            _repo_url("/actions/runs"), headers=_headers(), params=params
+            _repo_url("/actions/runs", repo=repo), headers=_headers(token), params=params
         )
         resp.raise_for_status()
         data = resp.json()
         return data.get("workflow_runs", [])
 
 
-async def get_workflow_run(run_id: int) -> Dict[str, Any]:
+async def get_workflow_run(run_id: int, repo: Optional[str] = None, token: Optional[str] = None) -> Dict[str, Any]:
     """获取单个 workflow run 详情"""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            _repo_url(f"/actions/runs/{run_id}"), headers=_headers()
+            _repo_url(f"/actions/runs/{run_id}", repo=repo), headers=_headers(token)
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def get_copilot_workflow_status(branch: str) -> Optional[Dict[str, Any]]:
+async def get_copilot_workflow_status(branch: str, repo: Optional[str] = None, token: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     获取指定分支上 Copilot coding agent 的 workflow 状态。
     返回最新的 workflow run 信息, 或 None (未找到)。
     """
     try:
-        runs = await list_workflow_runs(branch=branch, per_page=5)
+        runs = await list_workflow_runs(branch=branch, per_page=5, repo=repo, token=token)
         # 找 Copilot coding agent 的 run
         for run in runs:
             name = (run.get("name") or "").lower()

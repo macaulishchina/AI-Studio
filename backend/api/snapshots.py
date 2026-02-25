@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studio.backend.core.database import get_db
-from studio.backend.models import Snapshot
+from studio.backend.models import Snapshot, WorkspaceDir
 from studio.backend.services import snapshot_service
 
 logger = logging.getLogger(__name__)
@@ -119,35 +119,66 @@ def _mask_token(t: str) -> str:
 
 
 @system_router.post("/github-token")
-async def set_github_token(body: _GHTokenBody):
-    """设置 / 更新 GitHub Token（运行时生效，重启后需 .env 持久化）"""
+async def set_github_token(body: _GHTokenBody, db: AsyncSession = Depends(get_db)):
+    """设置 / 更新 GitHub Token（绑定到当前活跃工作目录）"""
     from studio.backend.core.config import settings as _s
-    _s.github_token = body.token.strip()
-    return {"ok": True, "masked_token": _mask_token(_s.github_token)}
+    token = body.token.strip()
+    row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
+    if row:
+        row.github_token = token
+        _s.github_token = token
+        return {
+            "ok": True,
+            "masked_token": _mask_token(token),
+            "scope": "workspace",
+            "workspace_id": row.id,
+            "workspace_path": row.path,
+        }
+
+    # 无活跃目录时回退到进程内全局设置（临时）
+    _s.github_token = token
+    return {"ok": True, "masked_token": _mask_token(_s.github_token), "scope": "runtime"}
 
 
 @system_router.delete("/github-token")
-async def clear_github_token():
-    """清除 GitHub Token（运行时）"""
+async def clear_github_token(db: AsyncSession = Depends(get_db)):
+    """清除 GitHub Token（当前活跃工作目录）"""
     from studio.backend.core.config import settings as _s
+    row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
+    if row:
+        row.github_token = ""
+        _s.github_token = ""
+        return {"ok": True, "scope": "workspace", "workspace_id": row.id, "workspace_path": row.path}
     _s.github_token = ""
-    return {"ok": True}
+    return {"ok": True, "scope": "runtime"}
 
 
 @system_router.post("/github-repo")
-async def set_github_repo(body: _GHRepoBody):
-    """设置 GitHub 仓库（运行时生效）"""
+async def set_github_repo(body: _GHRepoBody, db: AsyncSession = Depends(get_db)):
+    """设置 GitHub 仓库（绑定到当前活跃工作目录）"""
     from studio.backend.core.config import settings as _s
-    _s.github_repo = body.repo.strip()
-    return {"ok": True, "repo": _s.github_repo}
+    repo = body.repo.strip()
+    row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
+    if row:
+        row.github_repo = repo
+        _s.github_repo = repo
+        return {"ok": True, "repo": repo, "scope": "workspace", "workspace_id": row.id, "workspace_path": row.path}
+
+    _s.github_repo = repo
+    return {"ok": True, "repo": _s.github_repo, "scope": "runtime"}
 
 
 @system_router.delete("/github-repo")
-async def clear_github_repo():
-    """清除 GitHub 仓库绑定（运行时）"""
+async def clear_github_repo(db: AsyncSession = Depends(get_db)):
+    """清除 GitHub 仓库绑定（当前活跃工作目录）"""
     from studio.backend.core.config import settings as _s
+    row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
+    if row:
+        row.github_repo = ""
+        _s.github_repo = ""
+        return {"ok": True, "scope": "workspace", "workspace_id": row.id, "workspace_path": row.path}
     _s.github_repo = ""
-    return {"ok": True}
+    return {"ok": True, "scope": "runtime"}
 
 
 @system_router.get("/status")
@@ -192,8 +223,18 @@ async def system_status():
 
     # VCS 状态（自动检测 git/svn）
     from studio.backend.core.config import settings as _settings
+    from studio.backend.core.database import async_session_maker
     from studio.backend.services.workspace_service import get_workspace_vcs_info, _get_git_recent_commits, _get_svn_recent_commits, detect_vcs_type
-    _ws = _settings.workspace_path
+    _active_ws = None
+    try:
+        async with async_session_maker() as db:
+            _active_ws = (await db.execute(
+                select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1)
+            )).scalar_one_or_none()
+    except Exception:
+        _active_ws = None
+
+    _ws = (_active_ws.path if _active_ws else _settings.workspace_path)
     vcs_info = {"type": "none", "branch": "", "commit": "", "commit_short": "", "commit_message": ""}
     _vt = "none"
     _recent = []
@@ -210,21 +251,29 @@ async def system_status():
     except Exception:
         pass
 
-    # GitHub 连接 (区分: 无token / 有token无repo / 全配置)
+    # GitHub 连接 (按活跃工作目录配置；当前目录非 Git 时可留空)
     github_status: dict = {"connected": False}
-    _has_token = bool(_settings.github_token)
-    _has_repo = bool(_settings.github_repo)
-    if not _has_token:
-        github_status["error"] = "GitHub Token 未配置，请在下方设置或 .env 中配置 GITHUB_TOKEN"
+    _gh_token = (_active_ws.github_token if _active_ws else _settings.github_token) or ""
+    _gh_repo = (_active_ws.github_repo if _active_ws else _settings.github_repo) or ""
+    _has_token = bool(_gh_token)
+    _has_repo = bool(_gh_repo)
+    if _vt != "git":
+        github_status["optional"] = True
+        github_status["hint"] = "当前工作目录不是 Git 仓库，GitHub 配置可选。"
+    elif not _has_token and not _has_repo:
+        github_status["optional"] = True
+        github_status["hint"] = "当前工作目录为 Git 仓库；如需 GitHub 功能，可按该目录设置 Token/仓库。"
+    elif not _has_token:
+        github_status["hint"] = "已配置仓库，但缺少 Token。"
     elif not _has_repo:
-        github_status["error"] = "GitHub Token 已配置，但未绑定仓库。请在 .env 中配置 GITHUB_REPO=owner/repo"
+        github_status["hint"] = "已配置 Token，但缺少 owner/repo 仓库绑定。"
         github_status["token_set"] = True
     else:
         from studio.backend.services import github_service
-        github_status = await github_service.check_connection()
+        github_status = await github_service.check_connection(repo=_gh_repo, token=_gh_token)
 
     # Token 脱敏信息
-    _masked_token = _mask_token(_settings.github_token) if _has_token else ""
+    _masked_token = _mask_token(_gh_token) if _has_token else ""
 
     return {
         "containers": [
@@ -241,7 +290,19 @@ async def system_status():
         },
         # 新增完整 VCS 字段
         "vcs": vcs_info,
-        "github": {**github_status, "masked_token": _masked_token, "repo_configured": _has_repo, "repo": _settings.github_repo or None},
+        "github": {
+            **github_status,
+            "masked_token": _masked_token,
+            "repo_configured": _has_repo,
+            "repo": _gh_repo or None,
+            "scope": {
+                "source": "workspace" if _active_ws else "runtime",
+                "workspace_id": getattr(_active_ws, "id", None),
+                "workspace_label": getattr(_active_ws, "label", "") if _active_ws else "",
+                "workspace_path": _ws,
+                "vcs_type": _vt,
+            },
+        },
     }
 
 

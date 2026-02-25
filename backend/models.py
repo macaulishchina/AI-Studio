@@ -99,6 +99,9 @@ class WorkspaceDir(Base):
     path = Column(String(500), nullable=False, unique=True)   # 绝对路径
     label = Column(String(100), default="")                   # 可选标签
     is_active = Column(Boolean, default=False, nullable=False) # 是否为当前活跃工作区
+    # 可选 GitHub 绑定 (按工作目录隔离)
+    github_token = Column(String(500), default="")
+    github_repo = Column(String(255), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

@@ -13,8 +13,6 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-PARENT_DIR="$(dirname "$PROJECT_ROOT")"
-FOLDER_NAME="$(basename "$PROJECT_ROOT")"
 
 echo ""
 echo "============================================================"
@@ -22,16 +20,8 @@ echo -e "  ${GREEN}AI-Studio (设计院) — 开发模式${NC}"
 echo "============================================================"
 echo ""
 
-# ── 创建 studio 符号链接 ──
-if [ "$FOLDER_NAME" != "studio" ]; then
-    if [ ! -e "$PARENT_DIR/studio" ]; then
-        echo -e "${BLUE}[INFO]${NC} 创建符号链接: $PARENT_DIR/studio → $PROJECT_ROOT"
-        ln -s "$PROJECT_ROOT" "$PARENT_DIR/studio"
-    fi
-fi
-
 # ── 环境变量 ──
-export PYTHONPATH="$PARENT_DIR"
+export PYTHONPATH="$PROJECT_ROOT"
 export STUDIO_DATA_PATH="${STUDIO_DATA_PATH:-$PROJECT_ROOT/dev-data}"
 export WORKSPACE_PATH="${WORKSPACE_PATH:-$PROJECT_ROOT}"
 export STUDIO_ADMIN_USER="${STUDIO_ADMIN_USER:-admin}"
@@ -83,7 +73,7 @@ trap cleanup SIGINT SIGTERM
 
 # 启动后端
 echo -e "  启动后端 (FastAPI)..."
-cd "$PARENT_DIR"
+cd "$PROJECT_ROOT"
 python3 -m uvicorn studio.backend.main:app \
     --host 0.0.0.0 --port 8002 \
     --reload --reload-dir "$PROJECT_ROOT/backend" &

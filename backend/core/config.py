@@ -3,8 +3,12 @@
 通用项目设计院，不绑定任何具体项目
 """
 import os
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -85,6 +89,17 @@ class StudioSettings:
     vcs_type: str = os.environ.get("VCS_TYPE", "auto")
 
     def __post_init__(self):
+        # 相对路径统一按项目根解析，避免受当前工作目录影响
+        data_path = Path(self.data_path)
+        if not data_path.is_absolute():
+            data_path = (PROJECT_ROOT / data_path).resolve()
+        self.data_path = str(data_path)
+
+        workspace_path = Path(self.workspace_path)
+        if not workspace_path.is_absolute():
+            workspace_path = (PROJECT_ROOT / workspace_path).resolve()
+        self.workspace_path = str(workspace_path)
+
         self.plans_path = os.path.join(self.data_path, "plans")
         self.db_backups_path = os.path.join(self.data_path, "db-backups")
         self.uploads_path = os.path.join(self.data_path, "uploads")

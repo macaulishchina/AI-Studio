@@ -14,19 +14,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studio.backend.core.config import settings
 from studio.backend.core.database import get_db
-from studio.backend.models import Project, ProjectStatus
+from studio.backend.models import Project, ProjectStatus, WorkspaceDir
 from studio.backend.services import github_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/projects", tags=["Implementation"])
 
 
-def _require_github():
+async def _resolve_project_github_config(db: AsyncSession, project: Project) -> tuple[str, str]:
+    """按项目工作目录解析 GitHub 配置（repo, token）。"""
+    ws = None
+    if project.workspace_dir:
+        ws = (await db.execute(
+            select(WorkspaceDir).where(WorkspaceDir.path == project.workspace_dir).limit(1)
+        )).scalar_one_or_none()
+    if ws is None:
+        ws = (await db.execute(
+            select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1)
+        )).scalar_one_or_none()
+
+    if ws is not None:
+        return (ws.github_repo or "").strip(), (ws.github_token or "").strip()
+    return (settings.github_repo or "").strip(), (settings.github_token or "").strip()
+
+
+def _require_github(repo: str, token: str):
     """GitHub 集成前置检查 — 未配置时返回 501"""
-    if not settings.github_repo or not settings.github_token:
+    if not repo or not token:
         raise HTTPException(
             status_code=501,
-            detail="GitHub 集成未配置。请设置 GITHUB_TOKEN 和 GITHUB_REPO 环境变量。",
+            detail="当前工作目录未配置 GitHub（Token + owner/repo）。请在系统设置中为该工作目录配置后重试。",
         )
 
 
@@ -66,11 +83,13 @@ async def start_implementation(
     2. 分配 copilot-swe-agent[bot] + agent_assignment, 触发 Copilot Coding Agent
     3. Agent 自动创建 copilot/ 分支和 Draft PR
     """
-    _require_github()
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
 
     if not project.plan_content:
         raise HTTPException(status_code=400, detail="请先敲定设计方案 (plan)")
@@ -93,7 +112,7 @@ async def start_implementation(
 
     # 构建 agent_assignment
     agent_assignment = {
-        "target_repo": settings.github_repo,
+        "target_repo": repo,
         "base_branch": data.base_branch,
     }
     if data.custom_instructions:
@@ -106,6 +125,8 @@ async def start_implementation(
             labels=["studio"],
             assignees=["copilot-swe-agent[bot]"],
             agent_assignment=agent_assignment,
+            repo=repo,
+            token=token,
         )
 
         project.github_issue_number = issue["number"]
@@ -130,11 +151,13 @@ async def get_implementation_status(
     db: AsyncSession = Depends(get_db),
 ):
     """查询实施进度 (轮询 GitHub Actions workflow + PR 状态)"""
-    _require_github()
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
 
     status_info = ImplementationStatus(
         project_id=project_id,
@@ -152,7 +175,7 @@ async def get_implementation_status(
     try:
         # ---- Step 1: 查找关联 PR (如果还没有记录) ----
         if not project.github_pr_number:
-            pulls = await github_service.list_pulls(state="all")
+            pulls = await github_service.list_pulls(state="all", repo=repo, token=token)
             for pr in pulls:
                 branch = pr.get("head", {}).get("ref", "")
                 body = pr.get("body", "") or ""
@@ -172,7 +195,7 @@ async def get_implementation_status(
         # ---- Step 2: 检查 workflow 状态 (核心监控) ----
         branch = project.branch_name
         if branch:
-            wf = await github_service.get_copilot_workflow_status(branch)
+            wf = await github_service.get_copilot_workflow_status(branch, repo=repo, token=token)
             if wf:
                 status_info.workflow_status = wf.get("status")
                 status_info.workflow_conclusion = wf.get("conclusion")
@@ -202,7 +225,7 @@ async def get_implementation_status(
 
         # ---- Step 3: 补充 PR 信息 ----
         if project.github_pr_number:
-            pr = await github_service.get_pull(project.github_pr_number)
+            pr = await github_service.get_pull(project.github_pr_number, repo=repo, token=token)
             status_info.github_pr_number = pr["number"]
             status_info.pr_title = pr.get("title")
             status_info.pr_url = pr.get("html_url")
@@ -241,15 +264,17 @@ async def get_pr_diff(
     db: AsyncSession = Depends(get_db),
 ):
     """获取 PR 的 diff 内容"""
-    _require_github()
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project or not project.github_pr_number:
         raise HTTPException(status_code=404, detail="未找到 PR")
 
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
+
     try:
-        diff = await github_service.get_pull_diff(project.github_pr_number)
-        files = await github_service.get_pull_files(project.github_pr_number)
+        diff = await github_service.get_pull_diff(project.github_pr_number, repo=repo, token=token)
+        files = await github_service.get_pull_files(project.github_pr_number, repo=repo, token=token)
         return {
             "diff": diff,
             "files": [
@@ -273,17 +298,21 @@ async def approve_and_merge_pr(
     db: AsyncSession = Depends(get_db),
 ):
     """Review 通过并合并 PR"""
-    _require_github()
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project or not project.github_pr_number:
         raise HTTPException(status_code=404, detail="未找到 PR")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
 
     try:
         merge_result = await github_service.merge_pull(
             project.github_pr_number,
             merge_method="squash",
             commit_message=f"[设计院] {project.title} (#{project.github_issue_number})",
+            repo=repo,
+            token=token,
         )
         project.status = ProjectStatus.deploying
         project.updated_at = datetime.utcnow()
@@ -322,13 +351,15 @@ async def prepare_review(
     3. 获取 diff 统计和变更文件列表
     4. 更新项目的工作区路径
     """
-    _require_github()
     from studio.backend.services import workspace_service
 
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
 
     branch = project.branch_name
     if not branch:
@@ -358,7 +389,6 @@ async def get_workspace_info(
     db: AsyncSession = Depends(get_db),
 ):
     """获取项目当前工作区的 git 信息"""
-    _require_github()
     from studio.backend.services import workspace_service
 
     result = await db.execute(select(Project).where(Project.id == project_id))
@@ -389,13 +419,15 @@ async def start_iteration(
     2. 重置状态为 discussing
     3. 递增 iteration_count
     """
-    _require_github()
     from studio.backend.services import workspace_service
 
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+
+    repo, token = await _resolve_project_github_config(db, project)
+    _require_github(repo, token)
 
     if project.status != ProjectStatus.reviewing:
         raise HTTPException(status_code=400, detail="只有在审查阶段才能发起迭代")

@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from functools import partial
 from typing import Dict, List, Optional, Tuple
+from sqlalchemy import select
 
 from studio.backend.core.config import settings
 
@@ -193,6 +194,41 @@ def _build_clone_url(repo: str, token: str) -> str:
     return f"https://github.com/{repo}.git"
 
 
+async def _resolve_project_git_config(project_id: int) -> Tuple[str, str]:
+    """
+    解析项目使用的 GitHub 仓库配置。
+    优先级:
+    1) 项目 workspace_dir 对应的 WorkspaceDir.github_*（按目录隔离）
+    2) 当前活跃 WorkspaceDir.github_*
+    3) settings.github_*（仅兜底）
+    """
+    from studio.backend.core.database import async_session_maker
+    from studio.backend.models import Project, WorkspaceDir
+
+    project_ws = ""
+    active_ws = None
+    async with async_session_maker() as db:
+        prj = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if prj and prj.workspace_dir:
+            project_ws = os.path.normpath(prj.workspace_dir)
+
+        if project_ws:
+            ws = (await db.execute(
+                select(WorkspaceDir).where(WorkspaceDir.path == project_ws).limit(1)
+            )).scalar_one_or_none()
+            if ws:
+                return (ws.github_repo or "").strip(), (ws.github_token or "").strip()
+
+        active_ws = (await db.execute(
+            select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1)
+        )).scalar_one_or_none()
+
+    if active_ws:
+        return (active_ws.github_repo or "").strip(), (active_ws.github_token or "").strip()
+
+    return (settings.github_repo or "").strip(), (settings.github_token or "").strip()
+
+
 async def prepare_review_workspace(
     project_id: int,
     branch_name: str,
@@ -218,8 +254,7 @@ async def prepare_review_workspace(
     """
     _ensure_workspaces_root()
     ws_path = get_review_workspace_path(project_id)
-    repo = settings.github_repo
-    token = settings.github_token
+    repo, token = await _resolve_project_git_config(project_id)
     clone_url = _build_clone_url(repo, token)
 
     result = {
@@ -318,8 +353,7 @@ async def prepare_iteration_workspace(
     """
     _ensure_workspaces_root()
     ws_path = get_iteration_workspace_path(project_id, iteration)
-    repo = settings.github_repo
-    token = settings.github_token
+    repo, token = await _resolve_project_git_config(project_id)
     clone_url = _build_clone_url(repo, token)
 
     result = {

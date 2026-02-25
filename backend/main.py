@@ -276,9 +276,25 @@ async def _auto_migrate():
                     path VARCHAR(500) NOT NULL UNIQUE,
                     label VARCHAR(100) DEFAULT '',
                     is_active BOOLEAN DEFAULT 0 NOT NULL,
+                    github_token VARCHAR(500) DEFAULT '',
+                    github_repo VARCHAR(255) DEFAULT '',
                     created_at DATETIME
                 )
             """)
+            # workspace_dirs 列迁移
+            try:
+                cursor_ws = await db.execute("PRAGMA table_info(workspace_dirs)")
+                ws_cols = {row[1] for row in await cursor_ws.fetchall()}
+                ws_col_migrations = {
+                    "github_token": "ALTER TABLE workspace_dirs ADD COLUMN github_token VARCHAR(500) DEFAULT ''",
+                    "github_repo": "ALTER TABLE workspace_dirs ADD COLUMN github_repo VARCHAR(255) DEFAULT ''",
+                }
+                for col, sql in ws_col_migrations.items():
+                    if col not in ws_cols:
+                        await db.execute(sql)
+                        logger.info(f"✅ 自动迁移: 添加 workspace_dirs.{col}")
+            except Exception:
+                pass
             logger.info("✅ workspace_dirs 表就绪")
 
             await db.commit()
@@ -370,17 +386,19 @@ async def _migrate_ask_user_permission():
 
 
 async def _sync_active_workspace():
-    """启动时从 DB 同步活跃工作目录到 settings.workspace_path"""
+    """启动时从 DB 同步活跃工作目录到 settings（含该目录 GitHub 配置）"""
     from studio.backend.core.database import async_session_maker
     from sqlalchemy import text
     try:
         async with async_session_maker() as db:
             # 检查 workspace_dirs 表是否存在
             row = (await db.execute(
-                text("SELECT path FROM workspace_dirs WHERE is_active = 1 LIMIT 1")
+                text("SELECT path, github_token, github_repo FROM workspace_dirs WHERE is_active = 1 LIMIT 1")
             )).first()
             if row:
                 settings.workspace_path = row[0]
+                settings.github_token = row[1] or ""
+                settings.github_repo = row[2] or ""
                 logger.info(f"📂 活跃工作目录 (DB): {row[0]}")
             else:
                 logger.info(f"📂 活跃工作目录 (ENV): {settings.workspace_path}")

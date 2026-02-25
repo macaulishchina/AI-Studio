@@ -1,9 +1,20 @@
 <template>
   <n-space vertical :size="16">
-    <!-- GitHub 连接 -->
-    <n-card title="🔗 GitHub 连接" size="small" style="background: #16213e">
+    <!-- GitHub 连接（按当前工作目录） -->
+    <n-card title="🔗 当前工作目录 GitHub 配置（可选）" size="small" style="background: #16213e">
       <n-spin :show="checkingGithub">
         <n-descriptions :column="1" label-placement="left" bordered>
+          <n-descriptions-item label="作用域">
+            <n-space :size="6" align="center" :wrap="true">
+              <n-tag size="small" type="info">{{ githubScopeText }}</n-tag>
+              <n-text v-if="githubStatus.scope?.workspace_label" style="font-size: 12px">
+                {{ githubStatus.scope.workspace_label }}
+              </n-text>
+              <n-text v-if="githubStatus.scope?.workspace_path" code style="font-size: 11px">
+                {{ githubStatus.scope.workspace_path }}
+              </n-text>
+            </n-space>
+          </n-descriptions-item>
           <!-- Token 状态 -->
           <n-descriptions-item label="Token">
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
@@ -26,17 +37,17 @@
           </n-descriptions-item>
           <!-- 连接状态 -->
           <n-descriptions-item label="状态">
-            <n-tag :type="githubStatus.connected ? 'success' : 'error'" size="small">
-              {{ githubStatus.connected ? '已连接' : '未连接' }}
+            <n-tag :type="githubStatus.connected ? 'success' : (githubStatus.optional ? 'default' : 'warning')" size="small">
+              {{ githubStatus.connected ? '已连接' : (githubStatus.optional ? '可选未启用' : '未连接') }}
             </n-tag>
           </n-descriptions-item>
           <!-- 分支 (连接成功时显示) -->
           <n-descriptions-item label="默认分支" v-if="githubStatus.default_branch">
             {{ githubStatus.default_branch }}
           </n-descriptions-item>
-          <!-- 错误提示 -->
-          <n-descriptions-item label="提示" v-if="githubStatus.error">
-            <n-text type="warning" style="font-size: 12px">{{ githubStatus.error }}</n-text>
+          <!-- 提示 -->
+          <n-descriptions-item label="提示" v-if="githubStatus.hint || githubStatus.error">
+            <n-text type="warning" style="font-size: 12px">{{ githubStatus.hint || githubStatus.error }}</n-text>
           </n-descriptions-item>
         </n-descriptions>
       </n-spin>
@@ -44,14 +55,17 @@
       <!-- 操作区 -->
       <n-space style="margin-top: 10px" :size="8" :wrap="true">
         <n-button size="small" @click="checkGithub" :loading="checkingGithub">🔄 重新检测</n-button>
-        <n-button size="small" type="primary" ghost @click="showTokenInput = !showTokenInput">
+        <n-button size="small" type="primary" ghost @click="showTokenInput = !showTokenInput" :disabled="!isGitWorkspace">
           {{ githubStatus.masked_token ? '🔑 更换 Token' : '🔑 设置 Token' }}
         </n-button>
         <n-button v-if="githubStatus.masked_token" size="small" type="error" ghost @click="handleClearToken">
           清除 Token
         </n-button>
-        <n-button size="small" ghost @click="showRepoInput = !showRepoInput">
+        <n-button size="small" ghost @click="showRepoInput = !showRepoInput" :disabled="!isGitWorkspace">
           {{ githubStatus.repo_configured ? '📦 更换仓库' : '📦 绑定仓库' }}
+        </n-button>
+        <n-button v-if="githubStatus.repo_configured" size="small" type="error" ghost @click="handleClearRepo">
+          清除仓库
         </n-button>
       </n-space>
 
@@ -71,7 +85,7 @@
           </n-button>
         </n-input-group>
         <n-text depth="3" style="font-size: 11px; margin-top: 4px; display: block">
-          Token 仅运行时生效，重启后需在 .env 中配置 GITHUB_TOKEN 持久化
+          Token 将绑定到当前活跃工作目录（仅该目录生效）
         </n-text>
       </div>
 
@@ -89,7 +103,7 @@
           </n-button>
         </n-input-group>
         <n-text depth="3" style="font-size: 11px; margin-top: 4px; display: block">
-          仓库绑定仅运行时生效，重启后需在 .env 中配置 GITHUB_REPO 持久化
+          仓库将绑定到当前活跃工作目录（支持非 Git / 非 GitHub 目录留空）
         </n-text>
       </div>
     </n-card>
@@ -318,6 +332,11 @@
     <n-card title="🔌 外部 API 端点检测" size="small" style="background: #16213e">
       <template #header-extra>
         <n-space :size="8">
+          <n-text v-if="probeResult?.context" depth="3" style="font-size: 11px; max-width: 560px">
+            作用域: {{ probeResult.context.source === 'workspace' ? '当前工作目录' : '运行时' }}
+            · {{ probeResult.context.vcs_type ? probeResult.context.vcs_type.toUpperCase() : 'NONE' }}
+            · {{ probeResult.context.github_repo || '未绑定 GitHub 仓库' }}
+          </n-text>
           <n-text v-if="probeResult" depth="3" style="font-size: 11px">
             {{ probeResult.ok }}✅ {{ probeResult.warning }}⚠️ {{ probeResult.error }}❌ {{ probeResult.skipped }}⏭
             · {{ probeResult.total_ms }}ms
@@ -347,10 +366,30 @@
                 <n-text style="font-size: 12px; font-family: monospace">{{ ep.name }}</n-text>
               </div>
               <n-text depth="3" style="font-size: 11px">{{ ep.description }}</n-text>
+              <div style="margin-top: 2px">
+                <n-text depth="3" style="font-size: 11px; font-family: monospace">
+                  {{ ep._result?.resolved_url || ep.resolved_url || ep.url }}
+                </n-text>
+              </div>
               <!-- 测试后显示消息 -->
-              <div v-if="ep._result && ep._result.status !== 'ok'" style="margin-top: 2px">
-                <n-text :type="ep._result.status === 'error' ? 'error' : 'warning'" style="font-size: 11px">
+              <div v-if="ep._result && ep._result.status !== 'ok'" style="margin-top: 2px; display: flex; flex-direction: column; gap: 2px">
+                <n-text :type="ep._result.status === 'error' ? 'error' : 'warning'" style="font-size: 11px; white-space: pre-wrap">
                   {{ ep._result.message }}
+                </n-text>
+                <n-text depth="3" style="font-size: 11px">
+                  HTTP: {{ ep._result.http_status || '—' }} · 耗时: {{ ep._result.latency_ms || '—' }}ms
+                </n-text>
+                <n-text v-if="ep._result.context?.workspace_path" depth="3" style="font-size: 11px">
+                  上下文: {{ ep._result.context.source === 'workspace' ? '当前工作目录' : '运行时' }}
+                  / {{ ep._result.context.vcs_type }} / {{ ep._result.context.workspace_path }}
+                </n-text>
+                <n-text
+                  v-for="(tip, tipIdx) in (ep._result.troubleshooting || [])"
+                  :key="`${ep.id}-tip-${tipIdx}`"
+                  depth="3"
+                  style="font-size: 11px"
+                >
+                  💡 {{ tip }}
                 </n-text>
               </div>
             </td>
@@ -431,6 +470,13 @@ const vcsLabel = computed(() => {
 const recentCommitLines = computed(() => {
   // 优先使用新格式（向后兼容旧 git 字段）
   return systemStatus.value?.git?.recent_commits || []
+})
+
+const isGitWorkspace = computed(() => githubStatus.value?.scope?.vcs_type === 'git')
+const githubScopeText = computed(() => {
+  const source = githubStatus.value?.scope?.source
+  if (source === 'workspace') return '当前工作目录'
+  return '运行时'
 })
 
 // ── 语言颜色 ──────────────────────────────
@@ -522,6 +568,16 @@ async function handleClearToken() {
   try {
     await systemApi.clearGithubToken()
     message.success('GitHub Token 已清除')
+    await checkGithub()
+  } catch (e: any) {
+    message.error(e.response?.data?.detail || '清除失败')
+  }
+}
+
+async function handleClearRepo() {
+  try {
+    await systemApi.clearGithubRepo()
+    message.success('GitHub 仓库已清除')
     await checkGithub()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '清除失败')

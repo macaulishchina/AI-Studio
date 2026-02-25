@@ -39,6 +39,8 @@ class WorkspaceDirOut(BaseModel):
     is_active: bool
     exists: bool = True       # 目录是否实际存在
     vcs_type: str = "none"    # 版本控制类型
+    github_token_configured: bool = False
+    github_repo: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -77,6 +79,8 @@ def _enrich_dir(ws: WorkspaceDir) -> dict:
                     break
                 cur = parent
     d["vcs_type"] = vcs
+    d["github_token_configured"] = bool(getattr(ws, "github_token", ""))
+    d["github_repo"] = (getattr(ws, "github_repo", "") or None)
     return d
 
 
@@ -116,6 +120,8 @@ async def list_workspace_dirs(db: AsyncSession = Depends(get_db)):
             path=settings.workspace_path,
             label=os.path.basename(os.path.normpath(settings.workspace_path)) or settings.workspace_path,
             is_active=True,
+            github_token=settings.github_token or "",
+            github_repo=settings.github_repo or "",
         )
         db.add(env_ws)
         await db.flush()
@@ -189,6 +195,8 @@ async def activate_workspace_dir(
 
     # 同步更新运行时 settings (当前进程即时生效)
     settings.workspace_path = ws.path
+    settings.github_token = ws.github_token or ""
+    settings.github_repo = ws.github_repo or ""
 
     # 清除工作区概览缓存 (切换后需要重新扫描)
     from studio.backend.services.workspace_service import clear_overview_cache
@@ -244,10 +252,14 @@ async def delete_workspace_dir(
         if next_ws:
             next_ws.is_active = True
             settings.workspace_path = next_ws.path
+            settings.github_token = next_ws.github_token or ""
+            settings.github_repo = next_ws.github_repo or ""
             await db.flush()
         else:
             # 恢复到环境变量默认值
             settings.workspace_path = os.environ.get("WORKSPACE_PATH", "/workspace")
+            settings.github_token = os.environ.get("GITHUB_TOKEN", "")
+            settings.github_repo = os.environ.get("GITHUB_REPO", "")
 
     logger.info(f"🗑️ 删除工作目录: {ws.path}")
 

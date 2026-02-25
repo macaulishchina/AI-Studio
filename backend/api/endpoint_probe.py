@@ -13,6 +13,7 @@
 """
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,8 +21,11 @@ from typing import Dict, Any, List, Optional
 
 import httpx
 from fastapi import APIRouter, Query
+from sqlalchemy import select
 
 from studio.backend.core.config import settings
+from studio.backend.core.database import async_session_maker
+from studio.backend.models import WorkspaceDir
 from studio.backend.services.copilot_auth import copilot_auth
 
 logger = logging.getLogger(__name__)
@@ -64,7 +68,7 @@ ENDPOINT_REGISTRY: List[EndpointDef] = [
         group="GitHub Core API",
         name="GET /repos/{repo}",
         method="GET",
-        url=f"https://api.github.com/repos/{settings.github_repo}",
+        url="https://api.github.com/repos/{repo}",
         auth_type="github_pat",
         description="获取仓库信息 (github_service.py 的 _repo_url 基础)",
         expect_keys=["full_name", "default_branch"],
@@ -203,14 +207,99 @@ ENDPOINT_REGISTRY: List[EndpointDef] = [
 
 # ==================== 探测执行 ====================
 
-async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
+def _mask_token(t: str) -> str:
+    if not t:
+        return ""
+    if len(t) > 16:
+        return t[:8] + "•" * 12 + t[-4:]
+    return "•" * len(t)
+
+
+def _detect_vcs_type(path: str) -> str:
+    if not path or not os.path.isdir(path):
+        return "none"
+    if os.path.isdir(os.path.join(path, ".git")):
+        return "git"
+    if os.path.isdir(os.path.join(path, ".svn")):
+        return "svn"
+    cur = os.path.abspath(path)
+    for _ in range(10):
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        if os.path.isdir(os.path.join(parent, ".svn")):
+            return "svn"
+        cur = parent
+    return "none"
+
+
+async def _resolve_probe_context() -> Dict[str, Any]:
+    """解析探测上下文：活跃工作目录 + 该目录 GitHub 配置。"""
+    ws = None
+    try:
+        async with async_session_maker() as db:
+            ws = (await db.execute(
+                select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1)
+            )).scalar_one_or_none()
+    except Exception:
+        ws = None
+
+    ws_path = (ws.path if ws else settings.workspace_path) or ""
+    vcs_type = _detect_vcs_type(ws_path)
+    github_repo = ((ws.github_repo if ws else settings.github_repo) or "").strip()
+    github_token = ((ws.github_token if ws else settings.github_token) or "").strip()
+
+    return {
+        "workspace_id": getattr(ws, "id", None),
+        "workspace_label": getattr(ws, "label", "") if ws else "",
+        "workspace_path": ws_path,
+        "source": "workspace" if ws else "runtime",
+        "vcs_type": vcs_type,
+        "github_repo": github_repo,
+        "github_token": github_token,
+        "github_token_masked": _mask_token(github_token),
+    }
+
+
+def _resolve_endpoint_url(ep: EndpointDef, ctx: Dict[str, Any]) -> str:
+    """根据上下文动态构造端点 URL。"""
+    if ep.id == "github_repo":
+        repo = (ctx.get("github_repo") or "").strip()
+        if repo:
+            return f"https://api.github.com/repos/{repo}"
+    return ep.url
+
+
+def _build_troubleshooting(ep: EndpointDef, result: Dict[str, Any], ctx: Dict[str, Any]) -> List[str]:
+    hints: List[str] = []
+    if ep.id == "github_repo" and not (ctx.get("github_repo") or ""):
+        hints.append("当前工作目录未绑定 GitHub 仓库（owner/repo），/repos/{repo} 无法检测。")
+    if ep.auth_type == "github_pat" and not (ctx.get("github_token") or ""):
+        hints.append("当前工作目录未配置 GitHub Token。")
+    if ctx.get("vcs_type") != "git" and ep.group == "GitHub Core API":
+        hints.append("当前工作目录不是 Git 仓库，GitHub 相关检测为可选项。")
+    if result.get("http_status") == 404 and ep.id == "github_repo":
+        hints.append("仓库不存在、仓库名错误，或 Token 无权访问该仓库。")
+    if result.get("http_status") == 401:
+        hints.append("Token 无效、过期或权限不足。")
+    if result.get("http_status") == 403:
+        hints.append("权限不足或触发速率限制（请检查 Token scopes 与 X-RateLimit）。")
+    if not hints and result.get("status") == "error":
+        hints.append("请查看 HTTP 状态码、返回 message 与 resolved_url 进一步排查。")
+    return hints
+
+async def _probe_one(ep: EndpointDef, timeout: int = 15, ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """探测单个端点, 返回结果字典"""
+    context = ctx or await _resolve_probe_context()
+    resolved_url = _resolve_endpoint_url(ep, context)
+
     result: Dict[str, Any] = {
         "id": ep.id,
         "group": ep.group,
         "name": ep.name,
         "method": ep.method,
         "url": ep.url,
+        "resolved_url": resolved_url,
         "description": ep.description,
         "auth_type": ep.auth_type,
         "status": "pending",
@@ -219,6 +308,16 @@ async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
         "message": "",
         "response_keys": [],
         "warnings": [],
+        "context": {
+            "source": context.get("source"),
+            "workspace_id": context.get("workspace_id"),
+            "workspace_label": context.get("workspace_label"),
+            "workspace_path": context.get("workspace_path"),
+            "vcs_type": context.get("vcs_type"),
+            "github_repo": context.get("github_repo") or None,
+            "github_token_masked": context.get("github_token_masked") or "",
+        },
+        "troubleshooting": [],
     }
 
     # 构建请求头
@@ -229,11 +328,18 @@ async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
 
     # 根据 auth_type 添加认证
     if ep.auth_type == "github_pat":
-        if not settings.github_token:
+        if not context.get("github_token"):
             result["status"] = "skipped"
-            result["message"] = "未配置 GITHUB_TOKEN"
+            result["message"] = "当前工作目录未配置 GitHub Token"
+            result["troubleshooting"] = _build_troubleshooting(ep, result, context)
             return result
-        headers["Authorization"] = f"Bearer {settings.github_token}"
+        # GitHub repo 端点额外要求 repo 已配置
+        if ep.id == "github_repo" and not context.get("github_repo"):
+            result["status"] = "skipped"
+            result["message"] = "当前工作目录未绑定 owner/repo，跳过该项检测"
+            result["troubleshooting"] = _build_troubleshooting(ep, result, context)
+            return result
+        headers["Authorization"] = f"Bearer {context.get('github_token')}"
 
     elif ep.auth_type == "copilot_oauth":
         if not copilot_auth.is_authenticated:
@@ -271,12 +377,12 @@ async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             if ep.method == "GET":
-                resp = await client.get(ep.url, headers=headers)
+                resp = await client.get(resolved_url, headers=headers)
             elif ep.method == "POST":
                 headers["Content-Type"] = "application/json"
-                resp = await client.post(ep.url, headers=headers, json=ep.body or {})
+                resp = await client.post(resolved_url, headers=headers, json=ep.body or {})
             else:
-                resp = await client.request(ep.method, ep.url, headers=headers)
+                resp = await client.request(ep.method, resolved_url, headers=headers)
 
         latency = (time.monotonic() - t0) * 1000
         result["http_status"] = resp.status_code
@@ -297,6 +403,7 @@ async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
                 result["message"] += f" | {err_body.get('message', resp.text[:200])}"
             except Exception:
                 result["message"] += f" | {resp.text[:200]}"
+            result["troubleshooting"] = _build_troubleshooting(ep, result, context)
             return result
 
         # JSON 结构校验
@@ -356,6 +463,9 @@ async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
         result["latency_ms"] = round((time.monotonic() - t0) * 1000, 1)
         result["message"] = f"探测异常: {type(e).__name__}: {e}"
 
+    if result["status"] in ("error", "warning", "skipped"):
+        result["troubleshooting"] = _build_troubleshooting(ep, result, context)
+
     return result
 
 
@@ -364,6 +474,7 @@ async def _probe_one(ep: EndpointDef, timeout: int = 15) -> Dict[str, Any]:
 @router.get("/endpoints")
 async def list_endpoints():
     """列出所有受监控的外部端点 (不执行探测)"""
+    ctx = await _resolve_probe_context()
     return [
         {
             "id": ep.id,
@@ -371,8 +482,18 @@ async def list_endpoints():
             "name": ep.name,
             "method": ep.method,
             "url": ep.url,
+            "resolved_url": _resolve_endpoint_url(ep, ctx),
             "auth_type": ep.auth_type,
             "description": ep.description,
+            "context": {
+                "source": ctx.get("source"),
+                "workspace_id": ctx.get("workspace_id"),
+                "workspace_label": ctx.get("workspace_label"),
+                "workspace_path": ctx.get("workspace_path"),
+                "vcs_type": ctx.get("vcs_type"),
+                "github_repo": ctx.get("github_repo") or None,
+                "github_token_masked": ctx.get("github_token_masked") or "",
+            },
         }
         for ep in ENDPOINT_REGISTRY
     ]
@@ -386,7 +507,8 @@ async def test_all_endpoints(timeout: int = Query(15, ge=5, le=60)):
     并发执行所有探测，返回每个端点的状态。
     """
     t0 = time.monotonic()
-    tasks = [_probe_one(ep, timeout=timeout) for ep in ENDPOINT_REGISTRY]
+    ctx = await _resolve_probe_context()
+    tasks = [_probe_one(ep, timeout=timeout, ctx=ctx) for ep in ENDPOINT_REGISTRY]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # 处理异常
@@ -418,6 +540,15 @@ async def test_all_endpoints(timeout: int = Query(15, ge=5, le=60)):
         "error": err_count,
         "skipped": skip_count,
         "total_ms": total_ms,
+        "context": {
+            "source": ctx.get("source"),
+            "workspace_id": ctx.get("workspace_id"),
+            "workspace_label": ctx.get("workspace_label"),
+            "workspace_path": ctx.get("workspace_path"),
+            "vcs_type": ctx.get("vcs_type"),
+            "github_repo": ctx.get("github_repo") or None,
+            "github_token_masked": ctx.get("github_token_masked") or "",
+        },
         "results": final_results,
     }
 
@@ -431,4 +562,4 @@ async def test_one_endpoint(
     ep = next((e for e in ENDPOINT_REGISTRY if e.id == endpoint_id), None)
     if not ep:
         return {"status": "error", "message": f"未知端点 ID: {endpoint_id}"}
-    return await _probe_one(ep, timeout=timeout)
+    return await _probe_one(ep, timeout=timeout, ctx=await _resolve_probe_context())

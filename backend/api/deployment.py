@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studio.backend.core.database import get_db, async_session_maker
 from studio.backend.models import (
-    Project, ProjectStatus, Deployment, DeployStatus, DeployType,
+    Project, ProjectStatus, Deployment, DeployStatus, DeployType, WorkspaceDir,
 )
 from studio.backend.services import deploy_service, github_service
 
@@ -47,6 +47,21 @@ class DeployRequest(BaseModel):
 _ws_connections: dict[int, list[WebSocket]] = {}
 
 
+async def _resolve_project_github_config(db: AsyncSession, project: Project) -> tuple[str, str]:
+    ws = None
+    if project.workspace_dir:
+        ws = (await db.execute(
+            select(WorkspaceDir).where(WorkspaceDir.path == project.workspace_dir).limit(1)
+        )).scalar_one_or_none()
+    if ws is None:
+        ws = (await db.execute(
+            select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1)
+        )).scalar_one_or_none()
+    if ws is None:
+        return "", ""
+    return (ws.github_repo or "").strip(), (ws.github_token or "").strip()
+
+
 # ==================== 部署 ====================
 
 @router.post("/{project_id}/deploy", response_model=DeploymentOut)
@@ -66,15 +81,18 @@ async def deploy_project(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     # 如果有 PR 且需要合并 (需要 GitHub 集成已配置)
-    if project.github_pr_number and settings.github_repo and settings.github_token:
+    repo, token = await _resolve_project_github_config(db, project)
+    if project.github_pr_number and repo and token:
         try:
-            pr = await github_service.get_pull(project.github_pr_number)
+            pr = await github_service.get_pull(project.github_pr_number, repo=repo, token=token)
             if not pr.get("merged"):
                 if data.skip_review:
                     # 直接合并
                     await github_service.merge_pull(
                         project.github_pr_number,
                         commit_message=f"[设计院] {project.title}",
+                        repo=repo,
+                        token=token,
                     )
                 else:
                     raise HTTPException(

@@ -33,6 +33,10 @@ interface StudioConfig {
   maxAutoContinues: number
   chatModelSourceFilter: string
   modelCapabilities: Record<string, ModelCapabilityOverride>
+  pricingSyncedAt?: string
+  pricingModelIds?: string[]
+  capabilityCalibratedAt?: string
+  capabilityModelIds?: string[]
 }
 
 function loadConfig(): StudioConfig {
@@ -49,8 +53,12 @@ function loadConfig(): StudioConfig {
         freeToolRounds: parsed.freeToolRounds ?? 50,
         paidToolRounds: parsed.paidToolRounds ?? 3,
         maxAutoContinues: parsed.maxAutoContinues ?? 3,
-        chatModelSourceFilter: parsed.chatModelSourceFilter ?? 'all',
+        chatModelSourceFilter: (parsed.chatModelSourceFilter === 'custom' ? 'all' : (parsed.chatModelSourceFilter ?? 'all')),
         modelCapabilities: parsed.modelCapabilities ?? {},
+        pricingSyncedAt: parsed.pricingSyncedAt ?? '',
+        pricingModelIds: parsed.pricingModelIds ?? [],
+        capabilityCalibratedAt: parsed.capabilityCalibratedAt ?? '',
+        capabilityModelIds: parsed.capabilityModelIds ?? [],
       }
     }
   } catch {}
@@ -65,6 +73,10 @@ function loadConfig(): StudioConfig {
     maxAutoContinues: 3,
     chatModelSourceFilter: 'all',
     modelCapabilities: {},
+    pricingSyncedAt: '',
+    pricingModelIds: [],
+    capabilityCalibratedAt: '',
+    capabilityModelIds: [],
   }
 }
 
@@ -85,6 +97,10 @@ export const useStudioConfigStore = defineStore('studioConfig', () => {
   const maxAutoContinues = ref(initial.maxAutoContinues)
   const chatModelSourceFilter = ref(initial.chatModelSourceFilter)
   const modelCapabilities = ref<Record<string, ModelCapabilityOverride>>(initial.modelCapabilities)
+  const pricingSyncedAt = ref(initial.pricingSyncedAt || '')
+  const pricingModelIds = ref<string[]>(initial.pricingModelIds || [])
+  const capabilityCalibratedAt = ref(initial.capabilityCalibratedAt || '')
+  const capabilityModelIds = ref<string[]>(initial.capabilityModelIds || [])
 
   // 自动持久化
   function persist() {
@@ -99,6 +115,10 @@ export const useStudioConfigStore = defineStore('studioConfig', () => {
       maxAutoContinues: maxAutoContinues.value,
       chatModelSourceFilter: chatModelSourceFilter.value,
       modelCapabilities: modelCapabilities.value,
+      pricingSyncedAt: pricingSyncedAt.value,
+      pricingModelIds: pricingModelIds.value,
+      capabilityCalibratedAt: capabilityCalibratedAt.value,
+      capabilityModelIds: capabilityModelIds.value,
     })
   }
 
@@ -112,6 +132,37 @@ export const useStudioConfigStore = defineStore('studioConfig', () => {
   watch(maxAutoContinues, persist)
   watch(chatModelSourceFilter, persist)
   watch(modelCapabilities, persist, { deep: true })
+  watch(pricingSyncedAt, persist)
+  watch(pricingModelIds, persist, { deep: true })
+  watch(capabilityCalibratedAt, persist)
+  watch(capabilityModelIds, persist, { deep: true })
+
+  function setPricingSync(modelIds: string[], syncedAt?: string) {
+    pricingModelIds.value = Array.from(new Set((modelIds || []).map(i => i.toLowerCase())))
+    pricingSyncedAt.value = syncedAt || new Date().toISOString()
+  }
+
+  function setCapabilityCalibration(modelIds: string[], calibratedAt?: string) {
+    capabilityModelIds.value = Array.from(new Set((modelIds || []).map(i => i.toLowerCase())))
+    capabilityCalibratedAt.value = calibratedAt || new Date().toISOString()
+  }
+
+  function clearModelSyncMarks() {
+    pricingModelIds.value = []
+    capabilityModelIds.value = []
+    pricingSyncedAt.value = ''
+    capabilityCalibratedAt.value = ''
+  }
+
+  function isPricingSyncedModel(modelId: string): boolean {
+    const clean = (modelId || '').replace(/^copilot:/, '').toLowerCase()
+    return pricingModelIds.value.includes(clean)
+  }
+
+  function isCapabilityCalibratedModel(modelId: string): boolean {
+    const clean = (modelId || '').replace(/^copilot:/, '').toLowerCase()
+    return capabilityModelIds.value.includes(clean)
+  }
 
   /**
    * 判断模型是否应该在列表中显示
@@ -216,6 +267,10 @@ export const useStudioConfigStore = defineStore('studioConfig', () => {
     maxAutoContinues,
     chatModelSourceFilter,
     modelCapabilities,
+    pricingSyncedAt,
+    pricingModelIds,
+    capabilityCalibratedAt,
+    capabilityModelIds,
     isModelVisible,
     getToolRounds,
     addToBlacklist,
@@ -224,6 +279,11 @@ export const useStudioConfigStore = defineStore('studioConfig', () => {
     getModelCapability,
     setModelCapability,
     getEffectiveMaxInput,
+    setPricingSync,
+    setCapabilityCalibration,
+    clearModelSyncMarks,
+    isPricingSyncedModel,
+    isCapabilityCalibratedModel,
     setDocModels,
   }
 })

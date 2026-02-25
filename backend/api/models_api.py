@@ -51,7 +51,7 @@ class ModelInfo(BaseModel):
     is_deprecated: bool = Field(False, description="是否即将弃用")
     pricing_note: str = Field("", description="定价/弃用说明")
     task: str = Field("", description="模型任务类型 (chat-completion, etc)")
-    is_custom: bool = Field(False, description="是否来自 DB 补充模型 (用于全局开关过滤)")
+    is_custom: bool = Field(False, description="是否来自 DB 自定义模型 (用于全局开关过滤)")
     model_family: str = Field("", description="二级分类/厂商族 (如 OpenAI, DeepSeek, MiniMax 等)")
     provider_slug: str = Field("", description="提供商标识 (github/copilot/deepseek 等)")
     provider_icon: str = Field("", description="提供商图标")
@@ -211,8 +211,10 @@ _DEPRECATED_MODELS: Dict[str, str] = {
     "claude-3.5-sonnet": "建议升级到 Claude Sonnet 4",
 }
 
-# 在线 token 上限来源 (社区维护，优先用于校准预设值)
-_CONTEXT_LIMITS_SOURCE_URL = "https://raw.githubusercontent.com/taylorwilsdon/llm-context-limits/main/README.md"
+# 官方 token 上限来源 (GitHub Models API)
+_OFFICIAL_MODELS_SOURCE_URL = f"{settings.github_models_endpoint}/models"
+# 官方 Copilot 模型来源 (授权后可用)
+_OFFICIAL_COPILOT_MODELS_URL = "https://api.githubcopilot.com/models"
 
 
 async def load_pricing_overrides_from_db():
@@ -306,10 +308,100 @@ def _parse_online_context_limits(markdown_text: str) -> Dict[str, tuple[int, int
 
 
 async def _fetch_online_context_limits() -> Dict[str, tuple[int, int]]:
+    # 兼容旧调用名: 统一走官方 GitHub Models 来源
+    return await _fetch_official_context_limits()
+
+
+async def _fetch_official_copilot_context_limits() -> Dict[str, tuple[int, int]]:
+    """从 Copilot 官方 /models 接口提取 token 上限（需要 Copilot 授权）。"""
+    limits: Dict[str, tuple[int, int]] = {}
+    raw_list = await _fetch_copilot_api_models()
+    for raw in raw_list:
+        model_name = (raw.get("id") or raw.get("name") or "").strip()
+        if not model_name:
+            continue
+        max_in, max_out = _extract_limits_from_raw(raw)
+        if max_in <= 0 and max_out <= 0:
+            continue
+        key = _normalize_model_key(model_name)
+        if max_in <= 0:
+            max_in = 128000
+        if max_out <= 0:
+            max_out = 4096
+        limits[key] = (max_in, max_out)
+    return limits
+
+
+def _extract_limits_from_raw(raw: Dict[str, Any]) -> tuple[int, int]:
+    """从官方 models 元数据提取输入/输出 token 上限。"""
+    max_input = (
+        raw.get("max_input_tokens")
+        or raw.get("context_window")
+        or raw.get("max_prompt_tokens")
+        or (raw.get("capabilities", {}) or {}).get("limits", {}).get("max_prompt_tokens")
+        or (raw.get("model_limits", {}) or {}).get("input_tokens")
+        or (raw.get("limits", {}) or {}).get("max_input_tokens")
+        or 0
+    )
+    max_output = (
+        raw.get("max_output_tokens")
+        or raw.get("max_completion_tokens")
+        or (raw.get("capabilities", {}) or {}).get("limits", {}).get("max_output_tokens")
+        or (raw.get("model_limits", {}) or {}).get("output_tokens")
+        or (raw.get("limits", {}) or {}).get("max_output_tokens")
+        or 0
+    )
+
+    try:
+        max_input = int(max_input or 0)
+    except Exception:
+        max_input = 0
+    try:
+        max_output = int(max_output or 0)
+    except Exception:
+        max_output = 0
+    return max_input, max_output
+
+
+async def _fetch_official_context_limits() -> Dict[str, tuple[int, int]]:
+    """从 GitHub Models 官方 /models 接口提取 token 上限。"""
+    from studio.backend.api.provider_api import get_provider_by_slug
+
+    github_provider = await get_provider_by_slug("github")
+    token = ((github_provider.api_key if github_provider else "") or settings.github_token or "").strip()
+    if not token:
+        raise RuntimeError("未配置 GitHub Models 全局 Token")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(_CONTEXT_LIMITS_SOURCE_URL)
-        resp.raise_for_status()
-        return _parse_online_context_limits(resp.text)
+        resp = await client.get(_OFFICIAL_MODELS_SOURCE_URL, headers=headers)
+        if resp.status_code != 200:
+            raise RuntimeError(f"官方 models 接口返回 HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+
+    raw_list = data if isinstance(data, list) else (
+        data.get("data") or data.get("models") or data.get("value") or []
+    )
+
+    limits: Dict[str, tuple[int, int]] = {}
+    for raw in raw_list:
+        model_name = (raw.get("name") or raw.get("id") or "").strip()
+        if not model_name:
+            continue
+        max_in, max_out = _extract_limits_from_raw(raw)
+        if max_in <= 0 and max_out <= 0:
+            continue
+        key = _normalize_model_key(model_name)
+        if max_in <= 0:
+            max_in = 128000
+        if max_out <= 0:
+            max_out = 4096
+        limits[key] = (max_in, max_out)
+
+    return limits
 
 
 def _classify_model(model_name: str, task: str, supports_tools: bool) -> str:
@@ -553,16 +645,16 @@ async def _fetch_github_models() -> List[ModelInfo]:
     """
     获取可用模型列表:
     1. 从 GitHub Models API 动态获取 (backend="models")
-    2. 合并 DB 中的 backend="models" 补充模型 (去重)
+    2. 合并 DB 中的 backend="models" 自定义模型 (去重)
     3. 如果 Copilot 已授权:
        a. 先尝试 Copilot API 动态获取 (优先)
        b. 失败时回退到 DB 中的 backend="copilot" 模型
     4. 应用 DB 能力覆盖
     """
-    token = settings.github_token
-    if not token:
-        raise RuntimeError("未配置 GITHUB_TOKEN，无法获取模型列表")
+    from studio.backend.api.provider_api import get_provider_by_slug
 
+    github_provider = await get_provider_by_slug("github")
+    token = ((github_provider.api_key if github_provider else "") or settings.github_token or "").strip()
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
@@ -571,51 +663,39 @@ async def _fetch_github_models() -> List[ModelInfo]:
     models: List[ModelInfo] = []
     seen_names: set = set()
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{settings.github_models_endpoint}/models",
-            headers=headers,
-        )
-
-        if resp.status_code == 200:
-            data = resp.json()
-            raw_list = data if isinstance(data, list) else (
-                data.get("data") or data.get("models") or data.get("value") or []
+    if token:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{settings.github_models_endpoint}/models",
+                headers=headers,
             )
 
-            for raw in raw_list:
-                try:
-                    model = _parse_model(raw)
-                    # 只保留 chat 相关模型
-                    if model.task and "chat" not in model.task and "completion" not in model.task:
+            if resp.status_code == 200:
+                data = resp.json()
+                raw_list = data if isinstance(data, list) else (
+                    data.get("data") or data.get("models") or data.get("value") or []
+                )
+
+                for raw in raw_list:
+                    try:
+                        model = _parse_model(raw)
+                        # 只保留 chat 相关模型
+                        if model.task and "chat" not in model.task and "completion" not in model.task:
+                            continue
+                        models.append(model)
+                        seen_names.add(model.id.lower())
+                    except Exception as e:
+                        logger.warning(f"解析模型数据失败: {e}, raw={raw.get('name', 'unknown')}")
                         continue
-                    models.append(model)
-                    seen_names.add(model.id.lower())
-                except Exception as e:
-                    logger.warning(f"解析模型数据失败: {e}, raw={raw.get('name', 'unknown')}")
-                    continue
 
-            logger.info(f"GitHub Models API 返回 {len(raw_list)} 个原始模型, 解析出 {len(models)} 个 chat 模型")
-        else:
-            error_text = resp.text[:500]
-            logger.warning(f"GitHub Models API 返回 {resp.status_code}: {error_text}")
+                logger.info(f"GitHub Models API 返回 {len(raw_list)} 个原始模型, 解析出 {len(models)} 个 chat 模型")
+            else:
+                error_text = resp.text[:500]
+                logger.warning(f"GitHub Models API 返回 {resp.status_code}: {error_text}")
+    else:
+        logger.warning("未配置 GitHub Models 全局 Token，跳过 GitHub Models API；将仅返回已配置的自定义/Copilot/第三方模型")
 
-    # 从 DB 加载补充模型 (替代原硬编码 _COPILOT_PRO_EXTRA_MODELS)
-    db_extra_models = await _load_db_custom_models("models")
-    extra_count = 0
-    for extra_raw in db_extra_models:
-        if extra_raw["name"].lower() not in seen_names:
-            try:
-                model = _parse_model(extra_raw, api_backend="models")
-                model.is_custom = True
-                models.append(model)
-                seen_names.add(model.id.lower())
-                extra_count += 1
-            except Exception as e:
-                logger.warning(f"解析 DB 补充模型失败: {e}")
-
-    if extra_count:
-        logger.info(f"从 DB 补充了 {extra_count} 个 models 后端模型")
+    # 历史包袱清理: 不再注入 DB 自定义模型到运行时列表
 
     # 添加 Copilot API 专属模型 (如果已授权)
     if copilot_auth.is_authenticated:
@@ -672,21 +752,7 @@ async def _fetch_github_models() -> List[ModelInfo]:
                     logger.warning(f"解析 Copilot 动态模型失败: {e}")
             logger.info(f"Copilot API 动态发现 {copilot_count} 个模型")
         else:
-            # 动态获取失败，回退到 DB 中的 copilot 模型 (替代原硬编码列表)
-            db_copilot_models = await _load_db_custom_models("copilot")
-            for cp_raw in db_copilot_models:
-                cp_name = cp_raw["name"].lower()
-                copilot_id = f"copilot:{cp_name}"
-                if copilot_id not in copilot_seen:
-                    try:
-                        model = _parse_model(cp_raw, api_backend="copilot")
-                        model.is_custom = True
-                        models.append(model)
-                        copilot_seen.add(copilot_id)
-                        copilot_count += 1
-                    except Exception as e:
-                        logger.warning(f"解析 DB Copilot 模型失败: {e}")
-            logger.info(f"回退使用 DB 配置，{copilot_count} 个 Copilot 模型")
+            logger.info("Copilot API 动态模型获取失败，已跳过历史 DB 自定义回退")
 
         if copilot_count:
             logger.info(f"添加了 {copilot_count} 个 Copilot API 专属模型")
@@ -1099,7 +1165,7 @@ async def list_models(
     vision_only: bool = Query(False, description="只返回支持图片的模型"),
     api_backend: Optional[str] = Query(None, description="筛选 API 后端: models / copilot"),
     refresh: bool = Query(False, description="强制刷新缓存"),
-    custom_models: bool = Query(True, description="是否包含补充模型 (全局开关)"),
+    custom_models: bool = Query(True, description="是否包含自定义模型 (全局开关)"),
 ):
     """
     获取可用的 AI 模型列表
@@ -1159,13 +1225,35 @@ async def refresh_models():
 @router.post("/token-limits/refresh")
 async def refresh_capabilities_online():
     """模型能力校准: 联网抓取 token 上限 + 内置知识库校准视觉/工具/推理能力"""
+    source_used: list[str] = []
+    warnings: list[str] = []
+    online_limits: Dict[str, tuple[int, int]] = {}
+
+    # 源 1: GitHub Models 官方接口
     try:
-        online_limits = await _fetch_online_context_limits()
+        gh_limits = await _fetch_official_context_limits()
+        if gh_limits:
+            online_limits.update(gh_limits)
+            source_used.append(_OFFICIAL_MODELS_SOURCE_URL)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"在线抓取 token 上限失败: {str(e)}")
+        warnings.append(f"GitHub Models 来源不可用: {str(e)}")
+
+    # 源 2: Copilot 官方接口（若已授权）
+    if copilot_auth.is_authenticated:
+        try:
+            cp_limits = await _fetch_official_copilot_context_limits()
+            if cp_limits:
+                online_limits.update(cp_limits)
+                source_used.append(_OFFICIAL_COPILOT_MODELS_URL)
+            else:
+                warnings.append("Copilot 来源未返回可解析的 token 上限")
+        except Exception as e:
+            warnings.append(f"Copilot 来源不可用: {str(e)}")
+    else:
+        warnings.append("Copilot 未授权，已跳过 Copilot 官方来源")
 
     if not online_limits:
-        raise HTTPException(status_code=503, detail="在线来源未解析到可用 token 上限数据")
+        raise HTTPException(status_code=503, detail="官方来源未解析到可用 token 上限数据")
 
     models = await _model_cache.get_models(force_refresh=False)
     updated = 0
@@ -1176,6 +1264,8 @@ async def refresh_capabilities_online():
 
     async with async_session_maker() as db:
         for m in models:
+            if not online_limits:
+                break
             candidates = [
                 _normalize_model_key(m.id.removeprefix("copilot:")),
                 _normalize_model_key(m.name),
@@ -1275,7 +1365,8 @@ async def refresh_capabilities_online():
 
     return {
         "success": True,
-        "source": _CONTEXT_LIMITS_SOURCE_URL,
+        "source": source_used,
+        "warning": "；".join(warnings) if warnings else "",
         "online_count": len(online_limits),
         "updated_count": updated,
         "cap_updated": cap_updated,
@@ -1613,4 +1704,34 @@ async def get_current_pricing():
         "pricing": _COPILOT_PREMIUM_COST,
         "count": len(_COPILOT_PREMIUM_COST),
         "source": "hardcoded + runtime overrides",
+    }
+
+
+@router.post("/overrides/reset-all")
+async def reset_all_model_overrides():
+    """一键恢复所有覆盖数据: 清空 DB 覆盖并恢复运行时默认定价/能力缓存。"""
+    from sqlalchemy import delete as sa_delete
+    from studio.backend.core.database import async_session_maker
+
+    # 1) 清空 DB 覆盖 (能力 + 定价覆盖都在同一表)
+    async with async_session_maker() as db:
+        await db.execute(sa_delete(ModelCapabilityOverride))
+        await db.commit()
+
+    # 2) 清空能力缓存覆盖/学习值
+    capability_cache.clear_db_overrides()
+    capability_cache._learned.clear()
+
+    # 3) 恢复运行时 Copilot 定价到默认值
+    global _COPILOT_PREMIUM_COST
+    _COPILOT_PREMIUM_COST = {k: dict(v) for k, v in _COPILOT_PREMIUM_COST_DEFAULTS.items()}
+
+    # 4) 标记缓存过期（由后续读取异步刷新，避免接口阻塞）
+    _model_cache._last_fetch = 0
+    _model_cache._fetch_error = None
+
+    return {
+        "ok": True,
+        "message": "已恢复默认：清空全部覆盖并回到接口/内置默认值",
+        "pricing_count": len(_COPILOT_PREMIUM_COST),
     }

@@ -3,6 +3,7 @@
 独立的后端服务，管理需求讨论、代码实施、部署流水线
 """
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -47,12 +48,9 @@ async def lifespan(app: FastAPI):
     # 自动迁移: 先于数据加载, 确保新列已存在
     await _auto_migrate()
 
-    # 种子数据: 自定义模型 + 加载能力覆盖到内存
-    from studio.backend.api.model_config import seed_custom_models, load_capability_overrides_to_cache
+    # 加载能力覆盖到内存
+    from studio.backend.api.model_config import load_capability_overrides_to_cache
     from studio.backend.api.models_api import load_pricing_overrides_from_db
-    from studio.backend.core.database import async_session_maker
-    async with async_session_maker() as db:
-        await seed_custom_models(db)
     await load_capability_overrides_to_cache()
     await load_pricing_overrides_from_db()
 
@@ -276,8 +274,16 @@ async def _auto_migrate():
                     path VARCHAR(500) NOT NULL UNIQUE,
                     label VARCHAR(100) DEFAULT '',
                     is_active BOOLEAN DEFAULT 0 NOT NULL,
+                    git_provider VARCHAR(20) DEFAULT 'github',
                     github_token VARCHAR(500) DEFAULT '',
                     github_repo VARCHAR(255) DEFAULT '',
+                    gitlab_url VARCHAR(255) DEFAULT 'https://gitlab.com',
+                    gitlab_token VARCHAR(500) DEFAULT '',
+                    gitlab_repo VARCHAR(255) DEFAULT '',
+                    svn_repo_url VARCHAR(500) DEFAULT '',
+                    svn_username VARCHAR(255) DEFAULT '',
+                    svn_password VARCHAR(500) DEFAULT '',
+                    svn_trunk_path VARCHAR(255) DEFAULT 'trunk',
                     created_at DATETIME
                 )
             """)
@@ -286,8 +292,16 @@ async def _auto_migrate():
                 cursor_ws = await db.execute("PRAGMA table_info(workspace_dirs)")
                 ws_cols = {row[1] for row in await cursor_ws.fetchall()}
                 ws_col_migrations = {
+                    "git_provider": "ALTER TABLE workspace_dirs ADD COLUMN git_provider VARCHAR(20) DEFAULT 'github'",
                     "github_token": "ALTER TABLE workspace_dirs ADD COLUMN github_token VARCHAR(500) DEFAULT ''",
                     "github_repo": "ALTER TABLE workspace_dirs ADD COLUMN github_repo VARCHAR(255) DEFAULT ''",
+                    "gitlab_url": "ALTER TABLE workspace_dirs ADD COLUMN gitlab_url VARCHAR(255) DEFAULT 'https://gitlab.com'",
+                    "gitlab_token": "ALTER TABLE workspace_dirs ADD COLUMN gitlab_token VARCHAR(500) DEFAULT ''",
+                    "gitlab_repo": "ALTER TABLE workspace_dirs ADD COLUMN gitlab_repo VARCHAR(255) DEFAULT ''",
+                    "svn_repo_url": "ALTER TABLE workspace_dirs ADD COLUMN svn_repo_url VARCHAR(500) DEFAULT ''",
+                    "svn_username": "ALTER TABLE workspace_dirs ADD COLUMN svn_username VARCHAR(255) DEFAULT ''",
+                    "svn_password": "ALTER TABLE workspace_dirs ADD COLUMN svn_password VARCHAR(500) DEFAULT ''",
+                    "svn_trunk_path": "ALTER TABLE workspace_dirs ADD COLUMN svn_trunk_path VARCHAR(255) DEFAULT 'trunk'",
                 }
                 for col, sql in ws_col_migrations.items():
                     if col not in ws_cols:
@@ -386,19 +400,77 @@ async def _migrate_ask_user_permission():
 
 
 async def _sync_active_workspace():
-    """启动时从 DB 同步活跃工作目录到 settings（含该目录 GitHub 配置）"""
+    """启动时同步活跃工作目录到 settings（含该目录 GitHub 配置）。
+
+    默认: DB 活跃目录优先。
+    若设置 WORKSPACE_PATH_FORCE=true/1/on，则强制使用环境变量 WORKSPACE_PATH 并同步到 DB。
+    """
     from studio.backend.core.database import async_session_maker
     from sqlalchemy import text
     try:
         async with async_session_maker() as db:
+            # 可选: 强制以环境变量作为活跃工作目录
+            force_env = os.environ.get("WORKSPACE_PATH_FORCE", "").strip().lower() in {"1", "true", "yes", "on"}
+            env_ws = settings.workspace_path
+            if force_env and env_ws and env_ws != "/workspace":
+                exists = (await db.execute(
+                    text("SELECT id FROM workspace_dirs WHERE path = :path LIMIT 1"),
+                    {"path": env_ws},
+                )).first()
+
+                # 先取消所有活跃
+                await db.execute(text("UPDATE workspace_dirs SET is_active = 0"))
+
+                if exists:
+                    await db.execute(
+                        text("UPDATE workspace_dirs SET is_active = 1 WHERE id = :id"),
+                        {"id": exists[0]},
+                    )
+                else:
+                    await db.execute(
+                        text(
+                            """
+                            INSERT INTO workspace_dirs(path, label, is_active, git_provider, github_token, github_repo, gitlab_url, gitlab_token, gitlab_repo, svn_repo_url, svn_username, svn_password, svn_trunk_path, created_at)
+                            VALUES(:path, :label, 1, :provider, :token, :repo, :gitlab_url, :gitlab_token, :gitlab_repo, :svn_repo_url, :svn_username, :svn_password, :svn_trunk_path, CURRENT_TIMESTAMP)
+                            """
+                        ),
+                        {
+                            "path": env_ws,
+                            "label": os.path.basename(os.path.normpath(env_ws)) or env_ws,
+                            "provider": settings.git_provider or "github",
+                            "token": settings.github_token or "",
+                            "repo": settings.github_repo or "",
+                            "gitlab_url": settings.gitlab_url or "https://gitlab.com",
+                            "gitlab_token": settings.gitlab_token or "",
+                            "gitlab_repo": settings.gitlab_repo or "",
+                            "svn_repo_url": settings.svn_repo_url or "",
+                            "svn_username": settings.svn_username or "",
+                            "svn_password": settings.svn_password or "",
+                            "svn_trunk_path": settings.svn_trunk_path or "trunk",
+                        },
+                    )
+
+                await db.commit()
+                settings.workspace_path = env_ws
+                logger.info(f"📂 活跃工作目录 (ENV 强制): {env_ws}")
+                return
+
             # 检查 workspace_dirs 表是否存在
             row = (await db.execute(
-                text("SELECT path, github_token, github_repo FROM workspace_dirs WHERE is_active = 1 LIMIT 1")
+                text("SELECT path, git_provider, github_token, github_repo, gitlab_url, gitlab_token, gitlab_repo, svn_repo_url, svn_username, svn_password, svn_trunk_path FROM workspace_dirs WHERE is_active = 1 LIMIT 1")
             )).first()
             if row:
                 settings.workspace_path = row[0]
-                settings.github_token = row[1] or ""
-                settings.github_repo = row[2] or ""
+                settings.git_provider = row[1] or "github"
+                settings.github_token = row[2] or ""
+                settings.github_repo = row[3] or ""
+                settings.gitlab_url = row[4] or "https://gitlab.com"
+                settings.gitlab_token = row[5] or ""
+                settings.gitlab_repo = row[6] or ""
+                settings.svn_repo_url = row[7] or ""
+                settings.svn_username = row[8] or ""
+                settings.svn_password = row[9] or ""
+                settings.svn_trunk_path = row[10] or "trunk"
                 logger.info(f"📂 活跃工作目录 (DB): {row[0]}")
             else:
                 logger.info(f"📂 活跃工作目录 (ENV): {settings.workspace_path}")

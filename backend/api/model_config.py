@@ -1,7 +1,7 @@
 """
 设计院 (Studio) - 模型配置管理 API
 
-管理自定义补充模型列表和模型能力覆盖:
+管理自定义模型列表和模型能力覆盖:
   - 自定义模型: 替代硬编码的 _COPILOT_PRO_EXTRA_MODELS / _COPILOT_EXCLUSIVE_MODELS
   - 能力覆盖: 手动修正模型的 token 限制、vision/tools/reasoning 能力
 """
@@ -88,7 +88,7 @@ class CapabilityOverrideUpdate(BaseModel):
 
 # ==================== 种子数据 ====================
 
-# Copilot Pro+ 补充模型 (backend="models")
+# Copilot Pro+ 自定义模型 (backend="models")
 # 这些模型已通过实际 API 调用验证可用，但 /models 列表端点不返回
 _SEED_EXTRA_MODELS = [
     # OpenAI
@@ -138,47 +138,9 @@ _SEED_COPILOT_MODELS = [
 
 async def seed_custom_models(db: AsyncSession):
     """
-    初始化种子数据: 如果 custom_models 表为空则插入默认模型列表。
-    仅首次启动时触发。
+    历史兼容函数: 自定义模型种子已废弃，不再自动插入。
     """
-    count = await db.scalar(select(func.count(CustomModel.id)))
-    if count and count > 0:
-        logger.info(f"custom_models 表已有 {count} 条记录, 跳过种子初始化")
-        return
-
-    logger.info("首次启动: 初始化自定义模型种子数据...")
-    inserted = 0
-
-    for raw in _SEED_EXTRA_MODELS:
-        db.add(CustomModel(
-            name=raw["name"],
-            friendly_name=raw.get("friendly_name", raw["name"]),
-            model_family=raw.get("model_family", ""),
-            task="chat-completion",
-            tags=raw.get("tags", []),
-            summary=raw.get("summary", ""),
-            api_backend="models",
-            enabled=True,
-            is_seed=True,
-        ))
-        inserted += 1
-
-    for raw in _SEED_COPILOT_MODELS:
-        db.add(CustomModel(
-            name=raw["name"],
-            friendly_name=raw.get("friendly_name", raw["name"]),
-            model_family=raw.get("model_family", ""),
-            task="chat-completion",
-            tags=raw.get("tags", []),
-            summary=raw.get("summary", ""),
-            api_backend="copilot",
-            enabled=True,
-            is_seed=True,
-        ))
-        inserted += 1
-
-    await db.commit()
-    logger.info(f"✅ 插入了 {inserted} 条种子模型配置")
+    logger.info("自定义模型种子已禁用，跳过初始化")
 
 
 async def get_custom_models_from_db(db: AsyncSession, api_backend: Optional[str] = None) -> list:
@@ -355,15 +317,13 @@ async def delete_custom_model(
 async def reset_custom_models(
     db: AsyncSession = Depends(get_db),
 ):
-    """重置为默认种子数据 (清空所有自定义模型并重新插入种子)"""
+    """清空历史自定义模型数据（不再重新插入种子）"""
     await db.execute(sa_delete(CustomModel))
     await db.flush()
-
-    await seed_custom_models(db)
     await _invalidate_model_cache()
 
     count = await db.scalar(select(func.count(CustomModel.id)))
-    return {"ok": True, "message": f"已重置，共 {count} 个模型"}
+    return {"ok": True, "message": f"已清空历史自定义模型，共 {count} 个模型"}
 
 
 # ==================== 能力覆盖 CRUD ====================

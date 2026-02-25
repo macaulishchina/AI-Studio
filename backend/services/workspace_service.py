@@ -61,6 +61,22 @@ def clear_overview_cache():
     _overview_cache = {}
     _overview_cache_ts = 0
 
+
+async def _resolve_active_workspace_path() -> str:
+    """解析当前生效工作目录: 优先 DB 活跃目录, 否则 settings.workspace_path。"""
+    try:
+        from studio.backend.core.database import async_session_maker
+        from studio.backend.models import WorkspaceDir
+        async with async_session_maker() as db:
+            row = (await db.execute(
+                select(WorkspaceDir.path).where(WorkspaceDir.is_active == True).limit(1)
+            )).first()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    return settings.workspace_path
+
 # ── 文件扩展名 → 语言映射 ──
 _EXT_LANG_MAP = {
     ".py": "Python", ".pyw": "Python",
@@ -172,7 +188,7 @@ async def _run_git(cmd: list, cwd: str, timeout: int = 120) -> Tuple[int, str, s
     return await loop.run_in_executor(None, partial(_run_git_sync, cmd, cwd, timeout))
 
 
-def _build_clone_url(repo: str, token: str) -> str:
+def _build_clone_url(repo: str, token: str, provider: str = "github", gitlab_url: str = "https://gitlab.com") -> str:
     """
     构建 clone URL
     优先使用 GIT_CLONE_URL 环境变量 (支持任意 Git 仓库)
@@ -186,17 +202,30 @@ def _build_clone_url(repo: str, token: str) -> str:
             # https://example.com/repo.git → https://x-access-token:TOKEN@example.com/repo.git
             url = url.replace("https://", f"https://x-access-token:{token}@", 1)
         return url
-    # 回退: 使用 GitHub repo 格式
+    provider = (provider or "github").lower()
+
+    # 回退: 使用 provider repo 格式
     if not repo:
-        raise ValueError("Git 仓库未配置。请设置 GIT_CLONE_URL 或 GITHUB_REPO 环境变量。")
+        raise ValueError("Git 仓库未配置。请设置 GIT_CLONE_URL 或对应平台仓库配置。")
+
+    if provider == "gitlab":
+        base = (gitlab_url or "https://gitlab.com").rstrip("/")
+        path = repo if repo.endswith(".git") else f"{repo}.git"
+        if token:
+            # GitLab PAT 常用用户名 oauth2
+            host = base.replace("https://", "", 1)
+            return f"https://oauth2:{token}@{host}/{path}"
+        return f"{base}/{path}"
+
+    # 默认 GitHub
     if token:
         return f"https://x-access-token:{token}@github.com/{repo}.git"
     return f"https://github.com/{repo}.git"
 
 
-async def _resolve_project_git_config(project_id: int) -> Tuple[str, str]:
+async def _resolve_project_git_config(project_id: int) -> Tuple[str, str, str, str]:
     """
-    解析项目使用的 GitHub 仓库配置。
+    解析项目使用的 Git 仓库配置（GitHub / GitLab）。
     优先级:
     1) 项目 workspace_dir 对应的 WorkspaceDir.github_*（按目录隔离）
     2) 当前活跃 WorkspaceDir.github_*
@@ -217,16 +246,55 @@ async def _resolve_project_git_config(project_id: int) -> Tuple[str, str]:
                 select(WorkspaceDir).where(WorkspaceDir.path == project_ws).limit(1)
             )).scalar_one_or_none()
             if ws:
-                return (ws.github_repo or "").strip(), (ws.github_token or "").strip()
+                provider = (ws.git_provider or "github").strip().lower()
+                if provider == "gitlab":
+                    return (
+                        (ws.gitlab_repo or "").strip(),
+                        (ws.gitlab_token or "").strip(),
+                        "gitlab",
+                        (ws.gitlab_url or "https://gitlab.com").strip(),
+                    )
+                return (
+                    (ws.github_repo or "").strip(),
+                    (ws.github_token or "").strip(),
+                    "github",
+                    "https://gitlab.com",
+                )
 
         active_ws = (await db.execute(
             select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1)
         )).scalar_one_or_none()
 
     if active_ws:
-        return (active_ws.github_repo or "").strip(), (active_ws.github_token or "").strip()
+        provider = (active_ws.git_provider or "github").strip().lower()
+        if provider == "gitlab":
+            return (
+                (active_ws.gitlab_repo or "").strip(),
+                (active_ws.gitlab_token or "").strip(),
+                "gitlab",
+                (active_ws.gitlab_url or "https://gitlab.com").strip(),
+            )
+        return (
+            (active_ws.github_repo or "").strip(),
+            (active_ws.github_token or "").strip(),
+            "github",
+            "https://gitlab.com",
+        )
 
-    return (settings.github_repo or "").strip(), (settings.github_token or "").strip()
+    provider = (settings.git_provider or "github").strip().lower()
+    if provider == "gitlab":
+        return (
+            (settings.gitlab_repo or "").strip(),
+            (settings.gitlab_token or "").strip(),
+            "gitlab",
+            (settings.gitlab_url or "https://gitlab.com").strip(),
+        )
+    return (
+        (settings.github_repo or "").strip(),
+        (settings.github_token or "").strip(),
+        "github",
+        "https://gitlab.com",
+    )
 
 
 async def prepare_review_workspace(
@@ -254,8 +322,8 @@ async def prepare_review_workspace(
     """
     _ensure_workspaces_root()
     ws_path = get_review_workspace_path(project_id)
-    repo, token = await _resolve_project_git_config(project_id)
-    clone_url = _build_clone_url(repo, token)
+    repo, token, provider, gitlab_url = await _resolve_project_git_config(project_id)
+    clone_url = _build_clone_url(repo, token, provider=provider, gitlab_url=gitlab_url)
 
     result = {
         "workspace_dir": ws_path,
@@ -353,8 +421,8 @@ async def prepare_iteration_workspace(
     """
     _ensure_workspaces_root()
     ws_path = get_iteration_workspace_path(project_id, iteration)
-    repo, token = await _resolve_project_git_config(project_id)
-    clone_url = _build_clone_url(repo, token)
+    repo, token, provider, gitlab_url = await _resolve_project_git_config(project_id)
+    clone_url = _build_clone_url(repo, token, provider=provider, gitlab_url=gitlab_url)
 
     result = {
         "workspace_dir": ws_path,
@@ -740,11 +808,16 @@ async def get_workspace_overview(force_refresh: bool = False) -> Dict:
     """
     global _overview_cache, _overview_cache_ts
 
+    ws = await _resolve_active_workspace_path()
     now = time.time()
-    if not force_refresh and _overview_cache and (now - _overview_cache_ts) < _OVERVIEW_CACHE_TTL:
+    if (
+        not force_refresh
+        and _overview_cache
+        and _overview_cache.get("workspace_path") == ws
+        and (now - _overview_cache_ts) < _OVERVIEW_CACHE_TTL
+    ):
         return {**_overview_cache, "from_cache": True}
 
-    ws = settings.workspace_path
     ws_exists = os.path.isdir(ws)
 
     result = {

@@ -40,9 +40,17 @@
                   size="small"
                   @update:value="toggleEnabled(tool, $event)"
                 />
-                <n-button size="tiny" quaternary @click="openEdit(tool)">
+                <n-button v-if="!tool.is_builtin" size="tiny" quaternary @click="openEdit(tool)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
+                <n-tooltip v-else>
+                  <template #trigger>
+                    <n-button size="tiny" quaternary disabled>
+                      <template #icon><n-icon :component="CreateOutline" /></template>
+                    </n-button>
+                  </template>
+                  内置工具不可编辑
+                </n-tooltip>
                 <n-button size="tiny" quaternary @click="handleDuplicate(tool)">
                   <template #icon><n-icon :component="CopyOutline" /></template>
                 </n-button>

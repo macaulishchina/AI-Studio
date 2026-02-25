@@ -486,6 +486,8 @@ async def update_tool(tool_id: int, data: ToolUpdate, db: AsyncSession = Depends
     tool = result.scalar_one_or_none()
     if not tool:
         raise HTTPException(status_code=404, detail="工具不存在")
+    if tool.is_builtin:
+        raise HTTPException(status_code=403, detail="内置工具不可编辑")
 
     update_data = data.model_dump(exclude_unset=True)
 

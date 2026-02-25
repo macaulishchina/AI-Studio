@@ -99,9 +99,20 @@ class WorkspaceDir(Base):
     path = Column(String(500), nullable=False, unique=True)   # 绝对路径
     label = Column(String(100), default="")                   # 可选标签
     is_active = Column(Boolean, default=False, nullable=False) # 是否为当前活跃工作区
+    # Git 平台配置（默认 GitHub）
+    git_provider = Column(String(20), default="github")
     # 可选 GitHub 绑定 (按工作目录隔离)
     github_token = Column(String(500), default="")
     github_repo = Column(String(255), default="")
+    # 可选 GitLab 绑定 (按工作目录隔离)
+    gitlab_url = Column(String(255), default="https://gitlab.com")
+    gitlab_token = Column(String(500), default="")
+    gitlab_repo = Column(String(255), default="")  # namespace/project
+    # 可选 SVN 覆盖配置（为空则使用系统环境/当前工作副本）
+    svn_repo_url = Column(String(500), default="")
+    svn_username = Column(String(255), default="")
+    svn_password = Column(String(500), default="")
+    svn_trunk_path = Column(String(255), default="trunk")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

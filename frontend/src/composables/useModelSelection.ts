@@ -38,9 +38,6 @@ export function useModelSelection(initialModel: string) {
         base.push({ label: m.publisher || slug, key: slug })
       }
     }
-    if (studioConfig.customModelsEnabled) {
-      base.push({ label: '🧩 补充模型', key: 'custom' })
-    }
     return base
   })
 
@@ -50,25 +47,40 @@ export function useModelSelection(initialModel: string) {
   })
 
   function onSourceFilterChange(key: string) {
-    if (key === 'custom' && !studioConfig.customModelsEnabled) {
+    if (key === 'custom') {
       modelSourceFilter.value = 'all'
       return
     }
     modelSourceFilter.value = key as any
   }
 
+  function normalizeSourceFilter() {
+    if (modelSourceFilter.value === 'custom') {
+      modelSourceFilter.value = 'all'
+    }
+  }
+
+  function ensureSelectedModelValid() {
+    if (!selectedModel.value) return
+    const exists = models.value.some((m: any) => m.id === selectedModel.value)
+    if (exists) return
+    const fallback = models.value.find((m: any) => m.id === 'gpt-4o') || models.value[0]
+    if (fallback?.id) {
+      selectedModel.value = fallback.id
+    }
+  }
+
   // 模型选项 (分组)
   const modelOptions = computed(() => {
     const byCategory = models.value.filter(m => m.category === 'discussion' || m.category === 'both')
-    const sourceFiltered = modelSourceFilter.value === 'all'
+    const source = modelSourceFilter.value === 'custom' ? 'all' : modelSourceFilter.value
+    const sourceFiltered = source === 'all'
       ? byCategory
-      : modelSourceFilter.value === 'copilot'
+      : source === 'copilot'
         ? byCategory.filter(m => m.provider_slug === 'copilot' || m.api_backend === 'copilot')
-        : modelSourceFilter.value === 'custom'
-          ? byCategory.filter(m => m.is_custom)
-          : modelSourceFilter.value === 'github'
+        : source === 'github'
             ? byCategory.filter(m => m.provider_slug === 'github' || (!m.provider_slug && m.api_backend === 'models'))
-            : byCategory.filter(m => m.provider_slug === modelSourceFilter.value)
+            : byCategory.filter(m => m.provider_slug === source)
 
     const filtered = sourceFiltered.filter(m => studioConfig.isModelVisible(m))
 
@@ -103,23 +115,6 @@ export function useModelSelection(initialModel: string) {
       children: g.items.map(mapOpt),
     }))
 
-    // 如果当前选中的模型不在列表中 (列表尚未加载或被过滤掉)，
-    // 注入一个占位选项，避免 n-select 显示空白
-    const allValues = result.flatMap(g => g.children.map(c => c.value))
-    if (selectedModel.value && !allValues.includes(selectedModel.value)) {
-      result.unshift({
-        type: 'group', label: '当前', key: '_current', provider_slug: 'github',
-        children: [{
-          label: selectedModel.value, value: selectedModel.value,
-          description: '', supports_vision: false, supports_tools: true,
-          is_reasoning: false, api_backend: '', is_custom: false,
-          provider_slug: 'github', pricing_tier: '', premium_multiplier: 0,
-          is_deprecated: false, pricing_note: '',
-          max_input_tokens: 0, max_output_tokens: 0,
-        }],
-      })
-    }
-
     return result
   })
 
@@ -133,8 +128,7 @@ export function useModelSelection(initialModel: string) {
   const selectedModelDisplay = computed(() => {
     const model = models.value.find((m: any) => m.id === selectedModel.value)
     if (!model) return selectedModel.value
-    const customStr = model.is_custom ? ' 🧩' : ''
-    return `${selectedModel.value}${customStr}`
+    return `${selectedModel.value}`
   })
 
   const selectedModelProviderIcon = computed(() => {
@@ -165,27 +159,61 @@ export function useModelSelection(initialModel: string) {
         option.label,
       ])
     }
-    const caps: string[] = []
-    if (option.is_reasoning) caps.push('🧠')
-    if (option.supports_vision) caps.push('👁️')
-    if (option.supports_tools) caps.push('🔧')
-    const depStr = option.is_deprecated ? ' ⚠️' : ''
-    const capStr = caps.length ? ` ${caps.join('')}` : ''
     const iconHtml = getProviderIcon(option.provider_slug || 'github', '', 12)
     const iconVNode = h('span', { innerHTML: iconHtml, style: 'display:inline-flex;vertical-align:middle;margin:0 2px' })
-    const customStr = option.is_custom ? ' 🧩' : ''
     const priceText = option.pricing_note || 'x0'
     const ctxText = option.max_input_tokens ? formatTokens(option.max_input_tokens) : ''
-    const nameStyle = selected ? 'font-weight:600' : ''
-    const priceStyle = selected
-      ? 'color:#18a058;font-size:11px;flex-shrink:0;margin-left:8px;font-weight:600'
-      : 'color:#888;font-size:11px;flex-shrink:0;margin-left:8px'
-    return h('div', { style: 'display:flex;justify-content:space-between;align-items:center;width:100%' }, [
-      h('span', { style: nameStyle }, [selected ? '● ' : '', option.label as string, ' ', iconVNode, customStr, capStr, depStr]),
-      h('span', { style: priceStyle }, [
-        ctxText ? h('span', { style: 'color:#666;margin-right:6px' }, ctxText) : null,
-        priceText,
+    const cleanId = String(option.value || option.label || '').replace(/^copilot:/, '').toLowerCase()
+    const pricingConfirmed = studioConfig.isPricingSyncedModel(cleanId)
+    const capabilityConfirmed = studioConfig.isCapabilityCalibratedModel(cleanId)
+    const priceColor = pricingConfirmed
+      ? (String(priceText).startsWith('x0') ? '#36ad6a' : '#f0a020')
+      : '#8a93a6'
+    const priceBg = pricingConfirmed
+      ? (String(priceText).startsWith('x0') ? 'rgba(24,160,88,.14)' : 'rgba(240,160,32,.14)')
+      : 'rgba(138,147,166,.16)'
+    const chip = (text: string, style: string) => h('span', { style }, text)
+    const caps: string[] = []
+    if (option.is_reasoning) caps.push('推理')
+    if (option.supports_vision) caps.push('视觉')
+    if (option.supports_tools) caps.push('工具')
+    const capsText = caps.length ? caps.join(' / ') : '未标注'
+    const capsShort = caps.length
+      ? caps.map(c => (c === '推理' ? '推' : c === '视觉' ? '视' : '工')).join('/')
+      : '未标'
+    const subParts: string[] = []
+    if (ctxText) subParts.push(`${ctxText} 上下文`)
+    subParts.push(`能力：${capsText}`)
+    if (option.is_deprecated) subParts.push('即将弃用')
+    const subText = subParts.join(' · ')
+    const selectedMeta = `${ctxText ? `${ctxText} · ` : ''}能力:${capsShort} · ${priceText}`
+
+    const priceChip = chip(
+      priceText,
+      `font-size:10px;line-height:16px;padding:0 6px;border-radius:10px;background:${priceBg};color:${priceColor};font-weight:600;`
+    )
+
+    if (selected) {
+      return h('div', { style: 'display:flex;align-items:center;width:100%;min-width:0;overflow:hidden' }, [
+        iconVNode,
+        h('span', { style: 'margin-left:2px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, [
+          h('span', { style: 'font-weight:600' }, option.label as string),
+          h('span', {
+            style: `margin-left:6px;font-size:10px;color:${capabilityConfirmed ? '#2b7fd9' : '#8a93a6'}`
+          }, selectedMeta),
+        ]),
+      ])
+    }
+
+    return h('div', { style: 'display:flex;flex-direction:column;gap:2px;width:100%;padding:1px 0' }, [
+      h('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px' }, [
+        h('span', { style: `display:inline-flex;align-items:center;min-width:0;font-weight:${selected ? 600 : 500}` }, [
+          iconVNode,
+          h('span', { style: 'margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, option.label as string),
+        ]),
+        priceChip,
       ]),
+      h('div', { style: `font-size:10px;color:${capabilityConfirmed ? '#2b7fd9' : '#8a93a6'};white-space:normal;line-height:1.35` }, subText),
     ])
   }
 
@@ -193,8 +221,10 @@ export function useModelSelection(initialModel: string) {
     loadingModels.value = true
     try {
       await modelApi.refresh()
-      const { data } = await modelApi.list({ category: 'discussion', custom_models: studioConfig.customModelsEnabled })
+      const { data } = await modelApi.list({ category: 'discussion', custom_models: false })
       models.value = data
+      normalizeSourceFilter()
+      ensureSelectedModelValid()
       message.success(`已刷新，共 ${data.length} 个可用模型`)
     } catch (e: any) {
       message.error('刷新模型列表失败: ' + (e.response?.data?.detail || e.message))
@@ -205,10 +235,10 @@ export function useModelSelection(initialModel: string) {
 
   async function loadModels() {
     try {
-      const { data } = await modelApi.list({ category: 'discussion', custom_models: studioConfig.customModelsEnabled })
+      const { data } = await modelApi.list({ category: 'discussion', custom_models: false })
       models.value = data
-      // 不重置 selectedModel — 保持用户/项目历史选择的模型
-      // 即使模型不在列表中也不改动，避免切换项目时闪烁
+      normalizeSourceFilter()
+      ensureSelectedModelValid()
     } catch {}
   }
 

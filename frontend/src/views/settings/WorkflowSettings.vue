@@ -26,9 +26,17 @@
               <n-space :size="4">
                 <n-tag size="tiny" :bordered="false" type="info">{{ mod.component_key }}</n-tag>
                 <n-switch v-model:value="mod.is_enabled" size="small" @update:value="toggleModule(mod, $event)" />
-                <n-button size="tiny" quaternary @click="openEditModule(mod)">
+                <n-button v-if="!mod.is_builtin" size="tiny" quaternary @click="openEditModule(mod)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
+                <n-tooltip v-else>
+                  <template #trigger>
+                    <n-button size="tiny" quaternary disabled>
+                      <template #icon><n-icon :component="CreateOutline" /></template>
+                    </n-button>
+                  </template>
+                  内置模块不可编辑
+                </n-tooltip>
                 <n-popconfirm v-if="!mod.is_builtin" @positive-click="handleDeleteModule(mod)">
                   <template #trigger>
                     <n-button size="tiny" quaternary type="error">
@@ -85,9 +93,17 @@
               </n-space>
               <n-space :size="8" align="center">
                 <n-switch :value="wf.is_enabled" size="small" @update:value="toggleWorkflow(wf, $event)" />
-                <n-button size="tiny" quaternary @click="openEditWorkflow(wf)">
+                <n-button v-if="!wf.is_builtin" size="tiny" quaternary @click="openEditWorkflow(wf)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
+                <n-tooltip v-else>
+                  <template #trigger>
+                    <n-button size="tiny" quaternary disabled>
+                      <template #icon><n-icon :component="CreateOutline" /></template>
+                    </n-button>
+                  </template>
+                  内置工作流不可编辑
+                </n-tooltip>
                 <n-button size="tiny" quaternary @click="handleDuplicate(wf)">
                   <template #icon><n-icon :component="CopyOutline" /></template>
                 </n-button>

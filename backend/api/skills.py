@@ -452,6 +452,8 @@ async def update_skill(skill_id: int, data: SkillUpdate, db: AsyncSession = Depe
     skill = result.scalar_one_or_none()
     if not skill:
         raise HTTPException(status_code=404, detail="技能不存在")
+    if skill.is_builtin:
+        raise HTTPException(status_code=403, detail="内置技能不可编辑")
     update_dict = data.model_dump(exclude_unset=True)
     # 名称唯一性检查
     if "name" in update_dict and update_dict["name"] != skill.name:

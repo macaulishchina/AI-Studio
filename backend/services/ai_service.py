@@ -70,9 +70,11 @@ def new_request_id() -> str:
     logger.info(f"新消息 request_id: {rid[:8]}...")
     return rid
 
-def _parse_error_metadata(status_code: int, error_text: str, model: str) -> Dict[str, Any]:
+def _parse_error_metadata(status_code: int, error_text: str, model: str, provider_type: str = "") -> Dict[str, Any]:
     """从 API 错误响应中提取结构化元数据 (供前端展示和模型能力学习)"""
     meta: Dict[str, Any] = {"status_code": status_code, "model": model}
+    if provider_type:
+        meta["provider_type"] = provider_type
 
     lower = error_text.lower()
 
@@ -174,12 +176,20 @@ async def _get_copilot_headers(request_id: str = "") -> Dict[str, str]:
     }
 
 
-def _get_models_headers() -> Dict[str, str]:
+def _get_models_headers(token: str) -> Dict[str, str]:
     """获取 GitHub Models API 请求头"""
     return {
-        "Authorization": f"Bearer {settings.github_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+
+
+async def _get_github_models_token() -> str:
+    """获取 GitHub Models 全局 Token（优先 provider 配置，回退环境变量）。"""
+    from studio.backend.api.provider_api import get_provider_by_slug
+
+    provider = await get_provider_by_slug("github")
+    return ((provider.api_key if provider else "") or settings.github_token or "").strip()
 
 
 # ==================== 多服务商路由 ====================
@@ -265,12 +275,13 @@ async def _resolve_provider(model_id: str) -> ProviderInfo:
             logger.warning(f"提供商 '{slug}' 不存在或未启用, 回退到 GitHub Models")
 
     # 默认: GitHub Models
+    github_token = await _get_github_models_token()
     return ProviderInfo(
         provider_type="github_models",
         slug="github",
         actual_model=model_id,
         base_url=GITHUB_MODELS_URL,
-        api_key=settings.github_token or "",
+        api_key=github_token,
         icon="🐙",
         name="GitHub Models",
     )
@@ -441,8 +452,8 @@ async def chat_stream(
             yield {"type": "error", "error": "❌ 未授权 Copilot，请在设置页面完成 OAuth 授权"}
             return
     elif provider.provider_type == "github_models":
-        if not settings.github_token:
-            yield {"type": "error", "error": "❌ 未配置 GITHUB_TOKEN，无法调用 AI 服务"}
+        if not provider.api_key:
+            yield {"type": "error", "error": "❌ 未配置 GitHub Models 全局 Token，请在 AI 服务设置中配置"}
             return
     elif provider.provider_type == "openai_compatible":
         if not provider.api_key:
@@ -477,7 +488,7 @@ async def chat_stream(
             base_url = provider.base_url.rstrip("/")
             logger.info(f"Using {provider.name} ({provider.slug}) for model: {actual_model}")
         else:
-            headers = _get_models_headers()
+            headers = _get_models_headers(provider.api_key)
             base_url = provider.base_url
             logger.info(f"Using GitHub Models API for model: {actual_model}")
 
@@ -521,7 +532,7 @@ async def chat_stream(
                         error_text = response.text
                         logger.error(f"AI API error {response.status_code}: {error_text}")
                         capability_cache.learn_from_error(model, error_text)
-                        error_meta = _parse_error_metadata(response.status_code, error_text, model)
+                        error_meta = _parse_error_metadata(response.status_code, error_text, model, provider.provider_type)
                         yield {"type": "error", "error": f"❌ AI 服务错误 ({response.status_code}): {error_text}", "error_meta": error_meta}
                         return
 
@@ -564,7 +575,7 @@ async def chat_stream(
                             error_text = error_body.decode()
                             logger.error(f"AI API error {response.status_code}: {error_text}")
                             capability_cache.learn_from_error(model, error_text)
-                            error_meta = _parse_error_metadata(response.status_code, error_text, model)
+                            error_meta = _parse_error_metadata(response.status_code, error_text, model, provider.provider_type)
                             yield {"type": "error", "error": f"❌ AI 服务错误 ({response.status_code}): {error_text}", "error_meta": error_meta}
                             return
 

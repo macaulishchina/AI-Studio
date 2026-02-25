@@ -34,9 +34,17 @@
                   size="small"
                   @update:value="toggleEnabled(role, $event)"
                 />
-                <n-button size="tiny" quaternary @click="openEdit(role)">
+                <n-button v-if="!role.is_builtin" size="tiny" quaternary @click="openEdit(role)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
+                <n-tooltip v-else>
+                  <template #trigger>
+                    <n-button size="tiny" quaternary disabled>
+                      <template #icon><n-icon :component="CreateOutline" /></template>
+                    </n-button>
+                  </template>
+                  内置角色不可编辑
+                </n-tooltip>
                 <n-button size="tiny" quaternary @click="handleDuplicate(role)">
                   <template #icon><n-icon :component="CopyOutline" /></template>
                 </n-button>

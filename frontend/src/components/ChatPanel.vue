@@ -124,7 +124,16 @@
                     {{ msg.sender_name || msg.role }}
                   </n-text>
                   <n-tag v-if="msg.model_used" size="tiny" :bordered="false" round>
-                    {{ msg.model_used }}
+                    {{ displayModelName(msg.model_used) }}
+                  </n-tag>
+                  <n-tag
+                    v-if="msg.model_used"
+                    size="tiny"
+                    :bordered="false"
+                    round
+                    :type="resolveProviderBadge(msg.model_used).type"
+                  >
+                    {{ resolveProviderBadge(msg.model_used).label }}
                   </n-tag>
                   <n-text depth="3" style="font-size: 10px">
                     {{ formatTime(msg.created_at) }}
@@ -295,7 +304,10 @@
         <n-card size="small" style="max-width: 85%; background: #1a2a3e; border-left: 2px solid #e94560; --n-padding-top: 6px; --n-padding-bottom: 6px">
           <template #header>
             <n-space align="center" :size="6">
-              <n-text style="color: #e94560; font-size: 12px">{{ card.model }}</n-text>
+              <n-text style="color: #e94560; font-size: 12px">{{ displayModelName(card.model) }}</n-text>
+              <n-tag size="tiny" :bordered="false" round :type="resolveProviderBadge(card.model).type">
+                {{ resolveProviderBadge(card.model).label }}
+              </n-tag>
               <n-text v-if="card.senderName" depth="3" style="font-size: 10px">by {{ card.senderName }}</n-text>
               <n-spin size="small" />
               <n-button v-if="card.isMine && card.taskId" size="tiny" type="error" quaternary @click="cancelTask(card.taskId)" style="padding: 0 4px; font-size: 11px">⏹</n-button>
@@ -912,6 +924,24 @@ const {
 })
 
 const anyStreaming = anyStreamingWith(streaming)
+
+type ProviderBadge = { label: string; type: 'default' | 'info' | 'success' | 'warning' | 'error' }
+
+function displayModelName(modelId: string): string {
+  return (modelId || '').replace(/^copilot:/i, '')
+}
+
+function resolveProviderBadge(modelId: string): ProviderBadge {
+  const mid = (modelId || '').trim()
+  if (!mid) return { label: '未知路由', type: 'default' }
+  if (/^copilot:/i.test(mid)) return { label: 'Copilot 路由', type: 'success' }
+  if (!mid.includes(':')) return { label: 'GitHub 路由', type: 'info' }
+
+  const slug = mid.split(':', 1)[0].toLowerCase()
+  if (slug === 'github') return { label: 'GitHub 路由', type: 'info' }
+  if (slug === 'copilot') return { label: 'Copilot 路由', type: 'success' }
+  return { label: `${slug} 路由`, type: 'warning' }
+}
 
 // 多任务 + 敲定方案流式卡片统一入口
 const activeStreamCards = computed(() => {
@@ -1963,11 +1993,13 @@ onUnmounted(() => {
 .model-select-group {
   display: flex;
   align-items: center;
-  flex: 0 1 auto;
-  min-width: 100px;
+  flex: 1 1 0;
+  min-width: 180px;
   overflow: hidden;
 }
 .model-select-group .n-select {
+  flex: 1 1 0;
+  width: 100%;
   min-width: 0;
 }
 .model-select-group .n-base-selection {

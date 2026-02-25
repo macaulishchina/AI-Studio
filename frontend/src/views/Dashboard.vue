@@ -308,8 +308,8 @@ const providerFilters = computed(() => {
       filters.push({ value: slug, label: m.publisher || slug, icon: getProviderIcon(slug, m.publisher || slug, 12) })
     }
   }
-  if (studioConfig.customModelsEnabled) {
-    filters.push({ value: 'custom', label: '补充', icon: '' })
+  if (studioConfig.customModelsEnabled && models.value.some(m => !!m.is_custom)) {
+    filters.push({ value: 'custom', label: '自定义', icon: '' })
   }
   return filters
 })
@@ -493,27 +493,61 @@ function renderModelLabel(option: any, selected: boolean) {
       option.label,
     ])
   }
-  const caps: string[] = []
-  if (option.is_reasoning) caps.push('🧠')
-  if (option.supports_vision) caps.push('👁️')
-  if (option.supports_tools) caps.push('🔧')
-  const depStr = option.is_deprecated ? ' ⚠️' : ''
-  const capStr = caps.length ? ` ${caps.join('')}` : ''
   const iconHtml = getProviderIcon(option.provider_slug || 'github', '', 12)
   const iconVNode = h('span', { innerHTML: iconHtml, style: 'display:inline-flex;vertical-align:middle;margin:0 2px' })
-  const customStr = option.is_custom ? ' 🧩' : ''
   const priceText = option.pricing_note || 'x0'
   const ctxText = option.max_input_tokens ? formatTokens(option.max_input_tokens) : ''
-  const nameStyle = selected ? 'font-weight:600' : ''
-  const priceStyle = selected
-    ? 'color:#18a058;font-size:11px;flex-shrink:0;margin-left:12px;font-weight:600'
-    : 'color:#888;font-size:11px;flex-shrink:0;margin-left:12px'
-  return h('div', { style: 'display:flex;justify-content:space-between;align-items:center;width:100%' }, [
-    h('span', { style: nameStyle }, [selected ? '● ' : '', option.label as string, ' ', iconVNode, customStr, capStr, depStr]),
-    h('span', { style: priceStyle }, [
-      ctxText ? h('span', { style: 'color:#666;margin-right:6px' }, ctxText) : null,
-      priceText,
+  const cleanId = String(option.value || option.label || '').replace(/^copilot:/, '').toLowerCase()
+  const pricingConfirmed = studioConfig.isPricingSyncedModel(cleanId)
+  const capabilityConfirmed = studioConfig.isCapabilityCalibratedModel(cleanId)
+  const chip = (text: string, style: string) => h('span', { style }, text)
+  const caps: string[] = []
+  if (option.is_reasoning) caps.push('推理')
+  if (option.supports_vision) caps.push('视觉')
+  if (option.supports_tools) caps.push('工具')
+  const capsText = caps.length ? caps.join(' / ') : '未标注'
+  const capsShort = caps.length
+    ? caps.map(c => (c === '推理' ? '推' : c === '视觉' ? '视' : '工')).join('/')
+    : '未标'
+  const subParts: string[] = []
+  if (ctxText) subParts.push(`${ctxText} 上下文`)
+  subParts.push(`能力：${capsText}`)
+  if (option.is_deprecated) subParts.push('即将弃用')
+  const subText = subParts.join(' · ')
+  const selectedMeta = `${ctxText ? `${ctxText} · ` : ''}能力:${capsShort} · ${priceText}`
+
+  const priceColor = pricingConfirmed
+    ? (String(priceText).startsWith('x0') ? '#36ad6a' : '#f0a020')
+    : '#8a93a6'
+  const priceBg = pricingConfirmed
+    ? (String(priceText).startsWith('x0') ? 'rgba(24,160,88,.14)' : 'rgba(240,160,32,.14)')
+    : 'rgba(138,147,166,.16)'
+  const priceChip = chip(
+    priceText,
+    `font-size:10px;line-height:16px;padding:0 6px;border-radius:10px;background:${priceBg};color:${priceColor};font-weight:600;`
+  )
+
+  if (selected) {
+    return h('div', { style: 'display:flex;align-items:center;width:100%;min-width:0;overflow:hidden' }, [
+      iconVNode,
+      h('span', { style: 'margin-left:2px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, [
+        h('span', { style: 'font-weight:600' }, option.label as string),
+        h('span', {
+          style: `margin-left:6px;font-size:10px;color:${capabilityConfirmed ? '#2b7fd9' : '#8a93a6'}`
+        }, selectedMeta),
+      ]),
+    ])
+  }
+
+  return h('div', { style: 'display:flex;flex-direction:column;gap:2px;width:100%;padding:1px 0' }, [
+    h('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px' }, [
+      h('span', { style: `display:inline-flex;align-items:center;min-width:0;font-weight:${selected ? 600 : 500}` }, [
+        iconVNode,
+        h('span', { style: 'margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, option.label as string),
+      ]),
+      priceChip,
     ]),
+    h('div', { style: `font-size:10px;color:${capabilityConfirmed ? '#2b7fd9' : '#8a93a6'};white-space:normal;line-height:1.35` }, subText),
   ])
 }
 
@@ -526,7 +560,9 @@ function formatTokens(n: number): string {
 
 const modelOptions = computed(() => {
   const byCategory = models.value.filter(m => m.category === 'discussion' || m.category === 'both')
-  return buildGroupedOptions(filterBySource(byCategory, discussFilter.value))
+  const hasCustom = byCategory.some(m => !!m.is_custom)
+  const normalizedFilter = (discussFilter.value === 'custom' && !hasCustom) ? 'all' : discussFilter.value
+  return buildGroupedOptions(filterBySource(byCategory, normalizedFilter))
 })
 
 function statusType(status: string) {
@@ -640,6 +676,15 @@ onMounted(async () => {
   try {
     const { data } = await modelApi.list({ custom_models: studioConfig.customModelsEnabled })
     models.value = data
+    const hasCustom = data.some((m: any) => !!m.is_custom)
+    if (discussFilter.value === 'custom' && !hasCustom) {
+      discussFilter.value = 'all'
+    }
+    const allIds = new Set(data.map((m: any) => m.id))
+    if (!allIds.has(newProject.value.discussion_model)) {
+      const fallback = data.find((m: any) => m.id === 'gpt-4o') || data[0]
+      if (fallback?.id) newProject.value.discussion_model = fallback.id
+    }
   } catch {}
   // 工作区概览：先显示缓存(灰色)，再异步加载最新数据
   loadWsOverview()

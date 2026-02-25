@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from studio.backend.core.database import async_session_maker
+from studio.backend.core.config import settings
 from studio.backend.models import AIProvider
 from studio.backend.api.provider_presets import ALL_SEED_PROVIDERS
 
@@ -68,14 +69,19 @@ def _mask_key(key: str) -> str:
 
 
 def _provider_to_out(p: AIProvider) -> dict:
+    effective_key = (p.api_key or "").strip()
+    if p.slug == "github" and not effective_key:
+        # 兼容历史配置: 允许从环境变量回退
+        effective_key = (settings.github_token or "").strip()
+
     return {
         "id": p.id,
         "slug": p.slug,
         "name": p.name,
         "provider_type": p.provider_type,
         "base_url": p.base_url,
-        "api_key_set": bool(p.api_key),
-        "api_key_hint": _mask_key(p.api_key),
+        "api_key_set": bool(effective_key),
+        "api_key_hint": _mask_key(effective_key),
         "enabled": p.enabled,
         "is_builtin": p.is_builtin,
         "is_preset": p.is_preset,
@@ -188,6 +194,9 @@ async def update_provider(slug: str, data: ProviderUpdate):
                 provider.base_url = data.base_url
         if data.api_key is not None:
             provider.api_key = data.api_key
+            # GitHub Models 作为“全局 AI Token”来源，实时同步到运行时配置
+            if provider.slug == "github":
+                settings.github_token = data.api_key
         if data.enabled is not None:
             provider.enabled = data.enabled
         if data.icon is not None:
@@ -299,15 +308,15 @@ async def reset_providers():
 
 async def _test_github_models(provider: AIProvider) -> dict:
     """测试 GitHub Models API"""
-    from studio.backend.core.config import settings
-    if not settings.github_token:
-        return {"success": False, "message": "未配置 GITHUB_TOKEN 环境变量"}
+    token = (provider.api_key or settings.github_token or "").strip()
+    if not token:
+        return {"success": False, "message": "未配置 GitHub Models 全局 Token"}
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{provider.base_url}/models",
-                headers={"Authorization": f"Bearer {settings.github_token}", "Accept": "application/json"},
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             )
             if resp.status_code == 200:
                 data = resp.json()

@@ -99,6 +99,21 @@ export function parseErrorMeta(errorText: string, backendMeta?: any): any {
   return meta
 }
 
+function inferAuthProvider(meta: any, errorText: string): 'copilot' | 'github' | 'other' {
+  const provider = (meta?.provider_type || '').toLowerCase()
+  if (provider === 'copilot') return 'copilot'
+  if (provider === 'github_models') return 'github'
+
+  const model = (meta?.model || '').toLowerCase()
+  if (model.startsWith('copilot:')) return 'copilot'
+  if (model && !model.includes(':')) return 'github'
+
+  const txt = (errorText || '').toLowerCase()
+  if (txt.includes('copilot')) return 'copilot'
+  if (txt.includes('github') || txt.includes('githu')) return 'github'
+  return 'other'
+}
+
 export function formatErrorAsMessage(error: string, meta: any): string {
   const parts = ['**⚠️ AI 服务错误**\n']
 
@@ -120,7 +135,14 @@ export function formatErrorAsMessage(error: string, meta: any): string {
     }
     parts.push('\n💡 *建议：删除部分历史消息，或切换到上下文更大的模型*')
   } else if (meta.error_type === 'auth_error') {
-    parts.push('> 🔒 **认证失败**: 请前往设置页面检查 Copilot 授权状态')
+    const target = inferAuthProvider(meta, error)
+    if (target === 'copilot') {
+      parts.push('> 🔒 **认证失败**: 请前往设置页面检查 Copilot 授权状态')
+    } else if (target === 'github') {
+      parts.push('> 🔒 **认证失败**: 请前往设置页面检查 GitHub Models Token 是否有效')
+    } else {
+      parts.push('> 🔒 **认证失败**: 请前往设置页面检查当前模型对应服务的授权状态')
+    }
   } else {
     const brief = error.length > 300 ? error.slice(0, 300) + '...' : error
     parts.push('```\n' + brief + '\n```')

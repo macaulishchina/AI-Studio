@@ -1,7 +1,7 @@
 <template>
   <n-space vertical :size="16">
     <n-alert type="info" :bordered="false">
-      配置 AI 模型服务提供商。内置的 GitHub Models 和 Copilot 由系统管理，第三方提供商需要自行填写 API Key。
+      配置 AI 模型服务提供商。GitHub Models 使用全局 Token（与工作目录无关），Copilot 通过 OAuth 授权，第三方提供商需要自行填写 API Key。
       启用后，其模型会自动出现在讨论和实施的模型下拉列表中。
     </n-alert>
 
@@ -106,13 +106,45 @@
               <n-space align="center" :size="8">
                 <span v-html="getProviderIcon(p.slug, p.name, 20)" style="display:inline-flex"></span>
                 <n-text strong>{{ p.name }}</n-text>
-                <n-tag type="success" size="small">系统内置</n-tag>
+                <n-tag :type="p.api_key_set ? 'success' : 'default'" size="small">
+                  {{ p.api_key_set ? '已配置 Token' : '未配置 Token' }}
+                </n-tag>
               </n-space>
             </template>
             <template #header-extra>
               <n-switch :value="true" :disabled="true" size="small" />
             </template>
             <n-text depth="3" style="font-size: 12px">{{ p.description }}</n-text>
+
+            <n-space vertical :size="8" style="margin-top: 10px">
+              <n-input-group>
+                <n-input-group-label style="width: 80px">Token</n-input-group-label>
+                <n-input
+                  v-model:value="githubTokenInput"
+                  :placeholder="p.api_key_set ? `已设置 (${p.api_key_hint})` : '输入 GitHub PAT (Models 权限)'"
+                  type="password"
+                  show-password-on="click"
+                  size="small"
+                  style="flex: 1"
+                />
+                <n-button
+                  size="small"
+                  type="primary"
+                  :disabled="!githubTokenInput"
+                  :loading="savingGithubToken"
+                  @click="saveGithubToken"
+                >保存</n-button>
+              </n-input-group>
+
+              <n-text depth="3" style="font-size: 12px">
+                当前状态：{{ p.api_key_set ? `已配置（${p.api_key_hint}）` : '未配置' }}
+              </n-text>
+            </n-space>
+
+            <n-space style="margin-top: 10px">
+              <n-button size="small" :loading="testingGithub" @click="testProvider(p)">🧪 验证 Token</n-button>
+              <n-button size="small" type="warning" ghost :disabled="!p.api_key_set" @click="clearGithubToken">清除 Token</n-button>
+            </n-space>
           </n-card>
 
           <!-- 已配置的第三方 -->
@@ -252,6 +284,9 @@ const editingKeys = reactive<Record<string, string>>({})
 const editingUrls = reactive<Record<string, string>>({})
 const saving = reactive<Record<string, boolean>>({})
 const testing = reactive<Record<string, boolean>>({})
+const githubTokenInput = ref('')
+const savingGithubToken = ref(false)
+const testingGithub = computed(() => testing['github'] || false)
 
 async function loadProviders() {
   loading.value = true
@@ -318,6 +353,34 @@ async function saveBaseUrl(p: any) {
     await loadProviders()
   } catch (e: any) {
     message.error('更新失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+async function saveGithubToken() {
+  const token = githubTokenInput.value.trim()
+  if (!token) return
+  savingGithubToken.value = true
+  try {
+    await providerApi.update('github', { api_key: token, enabled: true })
+    githubTokenInput.value = ''
+    message.success('GitHub Models 全局 Token 已保存')
+    await loadProviders()
+    await modelApi.refresh()
+  } catch (e: any) {
+    message.error('保存失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    savingGithubToken.value = false
+  }
+}
+
+async function clearGithubToken() {
+  try {
+    await providerApi.update('github', { api_key: '' })
+    message.success('GitHub Models 全局 Token 已清除')
+    await loadProviders()
+    await modelApi.refresh()
+  } catch (e: any) {
+    message.error('清除失败: ' + (e.response?.data?.detail || e.message))
   }
 }
 

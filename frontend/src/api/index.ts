@@ -158,6 +158,7 @@ export const modelApi = {
   applyPricing: (scraped: Record<string, any>) => api.post('/models/pricing/apply', { scraped }),
   currentPricing: () => api.get('/models/pricing/current'),
   refreshTokenLimits: () => api.post('/models/token-limits/refresh', null, { timeout: 45000 }),
+  resetAllOverrides: () => api.post('/models/overrides/reset-all'),
 }
 
 // ==================== 模型配置管理 ====================
@@ -198,11 +199,21 @@ export const systemApi = {
   status: () => api.get('/system/status'),
   workspaceOverview: (forceRefresh = false) =>
     api.get('/system/workspace-overview', { params: forceRefresh ? { force_refresh: true } : {} }),
+  setGitProvider: (provider: 'github' | 'gitlab') => api.post('/system/git-provider', { provider }),
   // GitHub Token / Repo 运行时管理
   setGithubToken: (token: string) => api.post('/system/github-token', { token }),
   clearGithubToken: () => api.delete('/system/github-token'),
   setGithubRepo: (repo: string) => api.post('/system/github-repo', { repo }),
   clearGithubRepo: () => api.delete('/system/github-repo'),
+  // GitLab Token / Repo / URL 运行时管理
+  setGitlabToken: (token: string) => api.post('/system/gitlab-token', { token }),
+  clearGitlabToken: () => api.delete('/system/gitlab-token'),
+  setGitlabRepo: (repo: string) => api.post('/system/gitlab-repo', { repo }),
+  clearGitlabRepo: () => api.delete('/system/gitlab-repo'),
+  setGitlabUrl: (url: string) => api.post('/system/gitlab-url', { url }),
+  clearGitlabUrl: () => api.delete('/system/gitlab-url'),
+  // SVN 校验
+  validateSvn: () => api.post('/system/svn-validate'),
 }
 
 // ==================== 工作目录管理 ====================
@@ -210,9 +221,10 @@ export const workspaceDirApi = {
   list: () => api.get('/workspace-dirs'),
   add: (data: { path: string; label?: string }) => api.post('/workspace-dirs', data),
   activate: (id: number) => api.post(`/workspace-dirs/${id}/activate`),
-  update: (id: number, data: { label?: string }) => api.patch(`/workspace-dirs/${id}`, data),
+  update: (id: number, data: Record<string, any>) => api.patch(`/workspace-dirs/${id}`, data),
   remove: (id: number) => api.delete(`/workspace-dirs/${id}`),
   active: () => api.get('/workspace-dirs/active'),
+  validate: (id: number) => api.post(`/workspace-dirs/${id}/validate`),
 }
 
 // ==================== 端点探测 ====================

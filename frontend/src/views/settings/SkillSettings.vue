@@ -54,9 +54,17 @@
                   size="small"
                   @update:value="toggleEnabled(skill, $event)"
                 />
-                <n-button size="tiny" quaternary @click="openEdit(skill)">
+                <n-button v-if="!skill.is_builtin" size="tiny" quaternary @click="openEdit(skill)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
+                <n-tooltip v-else>
+                  <template #trigger>
+                    <n-button size="tiny" quaternary disabled>
+                      <template #icon><n-icon :component="CreateOutline" /></template>
+                    </n-button>
+                  </template>
+                  内置技能不可编辑
+                </n-tooltip>
                 <n-button size="tiny" quaternary @click="handleDuplicate(skill)">
                   <template #icon><n-icon :component="CopyOutline" /></template>
                 </n-button>

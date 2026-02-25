@@ -8,12 +8,20 @@
         </n-space>
       </template>
       <template #header-extra>
-        <n-popconfirm v-if="editMode" @positive-click="resetAllCapabilities">
-          <template #trigger>
-            <n-button size="tiny" type="warning" ghost>🔄 清除所有覆盖</n-button>
-          </template>
-          确定要清除所有手动覆盖的能力设置吗？将恢复为自动检测值。
-        </n-popconfirm>
+        <n-space :size="6">
+          <n-popconfirm v-if="editMode" @positive-click="resetAllCapabilities">
+            <template #trigger>
+              <n-button size="tiny" type="warning" ghost>🔄 清除能力覆盖</n-button>
+            </template>
+            确定要清除所有手动覆盖的能力设置吗？将恢复为自动检测值。
+          </n-popconfirm>
+          <n-popconfirm @positive-click="() => { void restoreAllOverrides() }">
+            <template #trigger>
+              <n-button size="tiny" type="error" ghost :loading="restoringOverrides" :disabled="restoringOverrides">♻ 恢复接口值</n-button>
+            </template>
+            将清空所有能力/定价覆盖并恢复为接口与内置默认值，确认继续？
+          </n-popconfirm>
+        </n-space>
       </template>
 
       <n-text depth="3" style="font-size: 11px; display: block; margin-bottom: 8px">
@@ -25,8 +33,12 @@
       <!-- 数据维护操作区 -->
       <div style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap">
         <!-- Copilot 定价刷新 -->
-        <div style="flex: 1; min-width: 280px; padding: 8px 12px; background: rgba(64, 152, 252, 0.06); border: 1px solid rgba(64, 152, 252, 0.15); border-radius: 6px">
-          <n-space align="center" justify="space-between" :wrap="false">
+        <div :style="isMobile
+          ? 'flex: 1; min-width: 0; padding: 8px 12px; background: rgba(64, 152, 252, 0.06); border: 1px solid rgba(64, 152, 252, 0.15); border-radius: 6px'
+          : 'flex: 1; min-width: 280px; padding: 8px 12px; background: rgba(64, 152, 252, 0.06); border: 1px solid rgba(64, 152, 252, 0.15); border-radius: 6px'">
+          <div :style="isMobile
+            ? 'display:flex;flex-direction:column;gap:8px;align-items:flex-start'
+            : 'display:flex;align-items:center;justify-content:space-between;gap:8px'">
             <n-space vertical :size="2">
               <n-text style="font-size: 12px; font-weight: 500">💰 Copilot 定价</n-text>
               <n-text depth="3" style="font-size: 10px">从
@@ -35,56 +47,160 @@
                 </n-button>
                 同步倍率，仅影响 Copilot 来源模型
               </n-text>
+              <n-text v-if="studioConfig.pricingSyncedAt" depth="3" style="font-size: 10px">
+                最近刷新：{{ formatSyncTime(studioConfig.pricingSyncedAt) }}
+              </n-text>
             </n-space>
-            <n-button size="tiny" type="primary" ghost @click="handleRefreshPricing" :loading="loadingPricing">
+            <n-button size="tiny" type="primary" ghost @click="handleRefreshPricing" :loading="loadingPricing" :block="isMobile">
               🔄 刷新定价
             </n-button>
-          </n-space>
+          </div>
         </div>
         <!-- 全局 Token 上限校准 -->
-        <div style="flex: 1; min-width: 280px; padding: 8px 12px; background: rgba(24, 160, 88, 0.06); border: 1px solid rgba(24, 160, 88, 0.15); border-radius: 6px">
-          <n-space align="center" justify="space-between" :wrap="false">
+        <div :style="isMobile
+          ? 'flex: 1; min-width: 0; padding: 8px 12px; background: rgba(24, 160, 88, 0.06); border: 1px solid rgba(24, 160, 88, 0.15); border-radius: 6px'
+          : 'flex: 1; min-width: 280px; padding: 8px 12px; background: rgba(24, 160, 88, 0.06); border: 1px solid rgba(24, 160, 88, 0.15); border-radius: 6px'">
+          <div :style="isMobile
+            ? 'display:flex;flex-direction:column;gap:8px;align-items:flex-start'
+            : 'display:flex;align-items:center;justify-content:space-between;gap:8px'">
             <n-space vertical :size="2">
               <n-text style="font-size: 12px; font-weight: 500">🧠 模型能力校准</n-text>
-              <n-text depth="3" style="font-size: 10px">联网校准 Token 上限 + 内置知识库校准视觉/工具/推理能力</n-text>
+              <n-space align="center" :size="6" :wrap="true">
+                <n-text depth="3" style="font-size: 10px">联网校准 Token 上限 + 内置知识库校准视觉/工具/推理能力</n-text>
+                <n-button
+                  text
+                  tag="a"
+                  href="https://docs.github.com/en/rest/models?apiVersion=2022-11-28"
+                  target="_blank"
+                  size="tiny"
+                  type="info"
+                  style="font-size: 10px"
+                >
+                  GitHub Models API
+                </n-button>
+                <n-button
+                  text
+                  tag="a"
+                  href="https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers"
+                  target="_blank"
+                  size="tiny"
+                  type="info"
+                  style="font-size: 10px"
+                >
+                  Copilot 模型文档
+                </n-button>
+                <n-popover trigger="click" placement="bottom-start" style="max-width: 520px">
+                  <template #trigger>
+                    <n-tag size="tiny" type="info" :bordered="false" round style="cursor: help">依据与方法</n-tag>
+                  </template>
+                  <n-space vertical :size="6">
+                    <n-text strong style="font-size: 12px">校准依据</n-text>
+                    <n-ul style="margin: 0; padding-left: 16px; font-size: 12px">
+                      <n-li>Token 上限：GitHub Models 官方 /models + Copilot 官方 /models 元数据（在线抓取）</n-li>
+                      <n-li>视觉/工具/推理：内置能力映射知识库（可人工覆盖）</n-li>
+                    </n-ul>
+                    <n-text strong style="font-size: 12px">校准方法</n-text>
+                    <n-ul style="margin: 0; padding-left: 16px; font-size: 12px">
+                      <n-li>按模型 ID 精确匹配，失败时使用前缀匹配（兼容日期后缀）</n-li>
+                      <n-li>仅在检测到差异时写入覆盖，避免无意义更新</n-li>
+                      <n-li>覆盖值立即生效，可在编辑模式中单模型回滚</n-li>
+                    </n-ul>
+                  </n-space>
+                </n-popover>
+              </n-space>
+              <n-text v-if="studioConfig.capabilityCalibratedAt" depth="3" style="font-size: 10px">
+                最近校准：{{ formatSyncTime(studioConfig.capabilityCalibratedAt) }}
+              </n-text>
             </n-space>
-            <n-button size="tiny" type="info" ghost @click="handleRefreshTokenLimits" :loading="loadingTokenLimits">
+            <n-button size="tiny" type="info" ghost @click="handleRefreshTokenLimits" :loading="loadingTokenLimits" :block="isMobile">
               🧠 校准
             </n-button>
-          </n-space>
+          </div>
         </div>
       </div>
 
-      <n-space align="center" style="margin-bottom: 8px" :size="8" :wrap="true">
-        <n-input
-          v-model:value="capSearch"
-          placeholder="搜索模型名..."
-          size="small" :style="{ width: isMobile ? '100%' : '160px' }" clearable
-        />
-        <n-select
-          v-model:value="capSourceFilter"
-          :options="sourceFilterOptions"
-          :render-label="renderSourceLabel"
-          size="small" :style="{ width: isMobile ? '47%' : '160px' }" placeholder="来源"
-        />
-        <n-select
-          v-model:value="capCompanyFilter"
-          :options="companyFilterOptions"
-          :render-label="renderCompanyLabel"
-          size="small" :style="{ width: isMobile ? '47%' : '140px' }" placeholder="厂商"
-        />
-        <n-select
-          v-model:value="capPricingFilter"
-          :options="pricingFilterOptions"
-          size="small" :style="{ width: isMobile ? '47%' : '130px' }" placeholder="定价"
-        />
-        <n-button size="small" @click="fetchMergedCapabilities" :loading="loadingMerged">
-          🔄 刷新
-        </n-button>
-        <n-button size="small" :type="editMode ? 'primary' : 'default'" @click="editMode = !editMode">
-          {{ editMode ? '✅ 完成' : '✏️ 编辑' }}
-        </n-button>
-      </n-space>
+      <template v-if="isMobile">
+        <div style="margin-bottom: 10px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06)">
+          <n-space vertical :size="8">
+            <n-input
+              v-model:value="capSearch"
+              placeholder="搜索模型名..."
+              size="small"
+              clearable
+            />
+
+            <n-grid :cols="2" :x-gap="8" :y-gap="8">
+              <n-gi>
+                <n-select
+                  v-model:value="capSourceFilter"
+                  :options="sourceFilterOptions"
+                  :render-label="renderSourceLabel"
+                  size="small"
+                  placeholder="来源"
+                />
+              </n-gi>
+              <n-gi>
+                <n-select
+                  v-model:value="capCompanyFilter"
+                  :options="companyFilterOptions"
+                  :render-label="renderCompanyLabel"
+                  size="small"
+                  placeholder="厂商"
+                />
+              </n-gi>
+              <n-gi :span="2">
+                <n-select
+                  v-model:value="capPricingFilter"
+                  :options="pricingFilterOptions"
+                  size="small"
+                  placeholder="定价"
+                />
+              </n-gi>
+            </n-grid>
+
+            <n-space :size="8" :wrap="false">
+              <n-button size="small" secondary block @click="fetchMergedCapabilities" :loading="loadingMerged">
+                刷新
+              </n-button>
+              <n-button size="small" :type="editMode ? 'primary' : 'default'" block @click="editMode = !editMode">
+                {{ editMode ? '完成' : '编辑' }}
+              </n-button>
+            </n-space>
+          </n-space>
+        </div>
+      </template>
+      <template v-else>
+        <n-space align="center" style="margin-bottom: 8px" :size="8" :wrap="true">
+          <n-input
+            v-model:value="capSearch"
+            placeholder="搜索模型名..."
+            size="small" :style="controlStyle(200)" clearable
+          />
+          <n-select
+            v-model:value="capSourceFilter"
+            :options="sourceFilterOptions"
+            :render-label="renderSourceLabel"
+            size="small" :style="controlStyle(160)" placeholder="来源"
+          />
+          <n-select
+            v-model:value="capCompanyFilter"
+            :options="companyFilterOptions"
+            :render-label="renderCompanyLabel"
+            size="small" :style="controlStyle(140)" placeholder="厂商"
+          />
+          <n-select
+            v-model:value="capPricingFilter"
+            :options="pricingFilterOptions"
+            size="small" :style="controlStyle(130)" placeholder="定价"
+          />
+          <n-button size="small" @click="fetchMergedCapabilities" :loading="loadingMerged">
+            🔄 刷新
+          </n-button>
+          <n-button size="small" :type="editMode ? 'primary' : 'default'" @click="editMode = !editMode">
+            {{ editMode ? '✅ 完成' : '✏️ 编辑' }}
+          </n-button>
+        </n-space>
+      </template>
 
       <n-spin :show="loadingMerged">
         <n-data-table
@@ -142,6 +258,11 @@ function onResize() { windowWidth.value = window.innerWidth }
 onMounted(() => window.addEventListener('resize', onResize))
 onUnmounted(() => window.removeEventListener('resize', onResize))
 
+function controlStyle(pcWidth: number) {
+  if (isMobile.value) return { width: '100%' }
+  return { width: `${pcWidth}px` }
+}
+
 // ==================== 编辑模式 ====================
 const editMode = ref(false)
 
@@ -175,7 +296,7 @@ function getModelSlug(m: any): string {
 
 function providerDisplayName(slug: string): string {
   if (slug === 'copilot') return 'Copilot'
-  if (slug === 'github') return 'GitHub Models'
+  if (slug === 'github') return 'GitHub'
   return slug.charAt(0).toUpperCase() + slug.slice(1)
 }
 
@@ -249,6 +370,16 @@ function renderCompanyLabel(option: any, selected: boolean) {
     h('span', { innerHTML: iconHtml, style: 'display:inline-flex' }),
     option.label as string,
   ])
+}
+
+function formatSyncTime(iso: string): string {
+  if (!iso) return '-'
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return iso
+  }
 }
 
 // === 定价 (动态) ===
@@ -348,12 +479,28 @@ async function resetAllCapabilities() {
   }
 }
 
+async function restoreAllOverrides() {
+  if (restoringOverrides.value) return
+  restoringOverrides.value = true
+  try {
+    await modelApi.resetAllOverrides()
+    studioConfig.clearModelSyncMarks()
+    await fetchMergedCapabilities()
+    message.success('已恢复默认接口值（覆盖已清空）')
+  } catch (e: any) {
+    message.error('恢复失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    restoringOverrides.value = false
+  }
+}
+
 
 
 // ==================== 定价刷新 ====================
 const loadingPricing = ref(false)
 const applyingPricing = ref(false)
 const loadingTokenLimits = ref(false)
+const restoringOverrides = ref(false)
 const showPricingDiffModal = ref(false)
 const pricingDiff = ref<any[]>([])
 const scrapedPricing = ref<Record<string, any>>({})
@@ -370,6 +517,7 @@ async function handleRefreshTokenLimits() {
     } else {
       message.success('模型能力已是最新')
     }
+    studioConfig.setCapabilityCalibration((data.matched_models || []).map((m: string) => m.toLowerCase()))
     await fetchMergedCapabilities()
   } catch (e: any) {
     message.error('校准失败: ' + (e.response?.data?.detail || e.message))
@@ -387,6 +535,7 @@ async function handleRefreshPricing() {
     const docIds = Object.keys(scrapedPricing.value || {}).map((k: string) => k.toLowerCase())
     docModelSet.value = new Set(docIds)
     studioConfig.setDocModels(docIds)
+    studioConfig.setPricingSync(docIds)
     showPricingDiffModal.value = true
     if (pricingDiff.value.length === 0) {
       message.success(`定价已是最新 (共 ${data.scraped_count} 个模型)`)
@@ -500,6 +649,38 @@ const pricingDiffColumns = [
 
 // ==================== 表格列定义 (响应编辑模式) ====================
 const mergedColumns = computed(() => {
+  const modelKey = (row: any) => String(row.id || '').replace(/^copilot:/, '').toLowerCase()
+  const toneByState = (state: 'default' | 'pricing' | 'capability' | 'override') => {
+    if (state === 'override') return '#f0a020'
+    if (state === 'capability') return '#2080f0'
+    if (state === 'pricing') return '#36ad6a'
+    return '#8a93a6'
+  }
+  const labelByState = (state: 'default' | 'pricing' | 'capability' | 'override') => {
+    if (state === 'override') return '手动覆盖'
+    if (state === 'capability') return '能力校准'
+    if (state === 'pricing') return '定价刷新'
+    return ''
+  }
+  const stateForField = (row: any, overrideField?: string, preferPricing = false): 'default' | 'pricing' | 'capability' | 'override' => {
+    if (overrideField && row[overrideField] !== null && row[overrideField] !== undefined) return 'override'
+    const key = modelKey(row)
+    if (preferPricing && studioConfig.isPricingSyncedModel(key)) return 'pricing'
+    if (studioConfig.isCapabilityCalibratedModel(key)) return 'capability'
+    return 'default'
+  }
+  const renderStateDot = (state: 'default' | 'pricing' | 'capability' | 'override') => {
+    if (state === 'default') return null
+    const color = toneByState(state)
+    const label = labelByState(state)
+    return h(NTooltip, { trigger: 'hover' }, {
+      trigger: () => h('span', {
+        style: `display:inline-block;width:6px;height:6px;border-radius:999px;background:${color};margin-left:6px;vertical-align:middle;opacity:.95`,
+      }),
+      default: () => label,
+    })
+  }
+
   const cols: any[] = [
     {
       title: '模型',
@@ -573,9 +754,11 @@ const mergedColumns = computed(() => {
       width: 80,
       sorter: (a: any, b: any) => (a.eff_max_input || 0) - (b.eff_max_input || 0),
       render(row: any) {
-        return h(NText, {
-          style: 'font-size:12px;font-variant-numeric:tabular-nums',
-        }, () => fmtTokens(row.eff_max_input))
+        const state = stateForField(row, 'override_max_input', false)
+        return h('span', { style: 'display:inline-flex;align-items:center' }, [
+          h(NText, { style: 'font-size:12px;font-variant-numeric:tabular-nums' }, () => fmtTokens(row.eff_max_input)),
+          renderStateDot(state),
+        ])
       },
     })
   }
@@ -607,9 +790,11 @@ const mergedColumns = computed(() => {
       width: 70,
       sorter: (a: any, b: any) => (a.eff_max_output || 0) - (b.eff_max_output || 0),
       render(row: any) {
-        return h(NText, {
-          style: 'font-size:12px;font-variant-numeric:tabular-nums',
-        }, () => fmtTokens(row.eff_max_output))
+        const state = stateForField(row, 'override_max_output', false)
+        return h('span', { style: 'display:inline-flex;align-items:center' }, [
+          h(NText, { style: 'font-size:12px;font-variant-numeric:tabular-nums' }, () => fmtTokens(row.eff_max_output)),
+          renderStateDot(state),
+        ])
       },
     })
   }
@@ -621,9 +806,13 @@ const mergedColumns = computed(() => {
     width: 80,
     sorter: (a: any, b: any) => (a.premium_multiplier ?? 0) - (b.premium_multiplier ?? 0),
     render(row: any) {
+      const state = stateForField(row, undefined, true)
       const color = row.premium_multiplier === 0 ? '#18a058' : '#f0a020'
       const text = row.premium_multiplier === 0 ? 'x0' : `x${row.premium_multiplier}`
-      return h(NTag, { size: 'tiny', bordered: false, style: `color:${color}` }, () => text)
+      return h('span', { style: 'display:inline-flex;align-items:center' }, [
+        h(NTag, { size: 'tiny', bordered: false, style: `color:${color};font-weight:600` }, () => text),
+        renderStateDot(state),
+      ])
     },
   })
 
@@ -640,7 +829,11 @@ const mergedColumns = computed(() => {
           'onUpdate:value': (val: boolean) => updateCapOverride(row, 'supports_vision', val),
         })
       }
-      return h(NText, { style: 'font-size:14px' }, () => row.eff_supports_vision ? '✅' : '—')
+      const state = stateForField(row, 'override_supports_vision', false)
+      return h('span', { style: 'display:inline-flex;align-items:center' }, [
+        h(NText, { style: 'font-size:14px;color:#cfd6e4' }, () => row.eff_supports_vision ? '✅' : '—'),
+        renderStateDot(state),
+      ])
     },
   })
 
@@ -657,7 +850,11 @@ const mergedColumns = computed(() => {
           'onUpdate:value': (val: boolean) => updateCapOverride(row, 'supports_tools', val),
         })
       }
-      return h(NText, { style: 'font-size:14px' }, () => row.eff_supports_tools ? '✅' : '—')
+      const state = stateForField(row, 'override_supports_tools', false)
+      return h('span', { style: 'display:inline-flex;align-items:center' }, [
+        h(NText, { style: 'font-size:14px;color:#cfd6e4' }, () => row.eff_supports_tools ? '✅' : '—'),
+        renderStateDot(state),
+      ])
     },
   })
 
@@ -674,7 +871,11 @@ const mergedColumns = computed(() => {
           'onUpdate:value': (val: boolean) => updateCapOverride(row, 'is_reasoning', val),
         })
       }
-      return h(NText, { style: 'font-size:14px' }, () => row.eff_is_reasoning ? '✅' : '—')
+      const state = stateForField(row, 'override_is_reasoning', false)
+      return h('span', { style: 'display:inline-flex;align-items:center' }, [
+        h(NText, { style: 'font-size:14px;color:#cfd6e4' }, () => row.eff_is_reasoning ? '✅' : '—'),
+        renderStateDot(state),
+      ])
     },
   })
 

@@ -96,6 +96,11 @@ class RoleSummary(BaseModel):
         from_attributes = True
 
 
+class ResetBuiltinsResponse(BaseModel):
+    updated: int
+    roles: List[RoleResponse]
+
+
 # ==================== Seed Data ====================
 
 BUILTIN_ROLES = [
@@ -112,14 +117,16 @@ BUILTIN_ROLES = [
 你的首要任务是帮助用户把需求想清楚、说明白，而不是急于给出技术方案。
 
 ### 对话策略
-1. **主动提问** — 用户描述需求后，立即用 `ask_user` 工具提出 3-5 个关键问题来澄清需求。不要等用户问你，你应该主动追问。
+1. **先聊再问** — 先用自然对话理解目标与场景，先复述你的理解并引导用户展开，不要一上来就问卷式连发问题。
 2. **聚焦「做什么」** — 讨论应围绕：用户故事、交互流程、业务规则、边界条件、优先级。避免主动讨论技术实现细节（数据库设计、API 路径等），除非用户明确要求。
-3. **连续提问** — 如果一轮回答后仍有不明确的地方，继续用 `ask_user` 追问。宁可多问几轮，也不要带着模糊需求就敲定方案。
-4. **总结确认** — 每轮问答后，简要总结你对需求的理解，让用户确认或纠正。
-5. **循循善诱** — 帮助用户发现他们没想到的需求场景，如：异常流程、权限控制、数据一致性、并发场景。
+3. **少量精准提问** — 仅在信息缺失或存在关键分歧时再提问；每轮优先 1-2 个最关键问题，避免开放性、主观偏好型、无法落地的问题。
+4. **收口补全** — 当讨论接近结束或用户准备敲定时，再用 `ask_user` 对遗漏与关键信息做补齐确认（如范围、约束、验收标准、异常流程）。
+5. **总结确认** — 每轮简要总结你对需求的理解，让用户确认或纠正，并基于反馈继续推进。
+6. **循循善诱** — 帮助用户发现他们没想到的需求场景，如：异常流程、权限控制、数据一致性、并发场景。
 
 ### ⚠️ 绝对禁止的行为
 - **禁止"预告式回复"**：不要说"好的，让我问几个问题："、"让我继续问…"然后就停止。如果你想提问，必须在**同一次回复中直接调用 `ask_user` 工具**。
+- **禁止开场问卷轰炸**：不要在用户刚开口时立刻抛出 3-5 个问题清单。
 - **禁止等待用户许可才提问**：不要说"需要我继续问吗？"或"你希望我深入哪个方面？"——直接调用 `ask_user` 提问。
 - **禁止无工具的纯确认回复**：不要用纯文字说"让我确认一下"然后停下来等用户回复。如果要确认，直接用 `ask_user` 列出确认问题。
 
@@ -195,19 +202,25 @@ BUILTIN_ROLES = [
         "strategy_prompt": """## 问诊策略
 
 ### 对话策略
-1. **症状采集** — 用户报告 Bug 后，立即用 `ask_user` 提出 3-5 个定位问题：
-   - 具体的错误现象是什么？（截图、报错信息、异常行为）
-   - 期望的正确行为是什么？
-   - 在什么条件下出现？（页面、操作步骤、数据状态）
-   - 是否稳定复现？复现步骤是什么？
-   - 什么时候开始出现的？最近有什么变更？
-2. **环境信息** — 追问运行环境：浏览器、设备、网络、数据库状态等
-3. **复现验证** — 要求用户确认复现步骤，确保步骤完整且可重复
-4. **边界探测** — 追问边界条件：
+1. **先引导描述** — 先请用户用自然语言描述现象、预期、触发步骤与影响范围，先复述并确认理解，不要一上来问卷式连发问题。
+2. **按需补问** — 仅在定位所需信息缺失时再用 `ask_user` 精准补问，每轮优先 1-2 个必要问题：
+    - 具体错误现象（截图/报错/异常行为）
+    - 期望正确行为
+    - 触发条件（页面、步骤、数据状态）
+    - 复现稳定性与复现步骤
+    - 出现时间与最近变更
+3. **环境信息** — 在必要时追问运行环境：浏览器、设备、网络、数据库状态等
+4. **复现验证** — 要求用户确认复现步骤，确保步骤完整且可重复
+5. **边界探测** — 追问边界条件：
    - 其他类似操作是否正常？
    - 换一组数据是否还是出问题？
    - 清缓存/重启后是否还复现？
-5. **只记不判** — 记录所有症状，但不做原因推断
+6. **只记不判** — 记录所有症状，但不做原因推断
+
+### 提问风格要求
+- 先讨论、后补问；不做开场问卷轰炸
+- 问题应客观、可验证、可决策，避免主观偏好型开放问题
+- 临近输出诊断书前，再集中补齐遗漏关键信息
 
 ### 绝对禁区
 - ❌ 不要说"这个问题可能是因为..."
@@ -380,6 +393,21 @@ BUILTIN_ROLES = [
     },
 ]
 
+# 内置角色允许被种子/重置覆盖的字段
+BUILTIN_UPDATE_KEYS = [
+    "role_prompt", "strategy_prompt", "tool_strategy_prompt",
+    "finalization_prompt", "output_generation_prompt",
+    "stages", "ui_labels", "icon", "description",
+    "default_skills", "sort_order",
+]
+
+
+def _apply_builtin_role_data(role: Role, role_data: dict):
+    """将内置角色模板数据应用到 DB 角色对象。"""
+    for key in BUILTIN_UPDATE_KEYS:
+        if key in role_data:
+            setattr(role, key, role_data[key])
+
 
 async def seed_roles():
     """初始化内置角色种子数据"""
@@ -395,12 +423,7 @@ async def seed_roles():
                 logger.info(f"✅ 创建内置角色: {role_data['name']}")
             else:
                 # 更新内置角色的 prompt (保持最新)
-                for key in ["role_prompt", "strategy_prompt", "tool_strategy_prompt",
-                            "finalization_prompt", "output_generation_prompt",
-                            "stages", "ui_labels", "icon", "description",
-                            "default_skills"]:
-                    if key in role_data:
-                        setattr(existing, key, role_data[key])
+                _apply_builtin_role_data(existing, role_data)
                 logger.info(f"🔄 更新内置角色: {role_data['name']}")
         await db.commit()
 
@@ -455,6 +478,12 @@ async def get_role(role_id: int, db: AsyncSession = Depends(get_db)):
     return _role_to_response(role)
 
 
+@router.post("/reset-builtins", response_model=ResetBuiltinsResponse)
+async def reset_all_builtin_roles(db: AsyncSession = Depends(get_db)):
+    """内置角色重置已禁用（内置角色只读）。"""
+    raise HTTPException(status_code=403, detail="内置角色为只读，已禁用重置")
+
+
 @router.post("", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
 async def create_role(data: RoleCreate, db: AsyncSession = Depends(get_db)):
     """创建自定义角色"""
@@ -491,6 +520,8 @@ async def update_role(role_id: int, data: RoleUpdate, db: AsyncSession = Depends
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
+    if role.is_builtin:
+        raise HTTPException(status_code=403, detail="内置角色不可编辑")
 
     update_data = data.model_dump(exclude_unset=True)
 
@@ -510,6 +541,12 @@ async def update_role(role_id: int, data: RoleUpdate, db: AsyncSession = Depends
     await db.flush()
     await db.refresh(role)
     return _role_to_response(role)
+
+
+@router.post("/{role_id}/reset", response_model=RoleResponse)
+async def reset_builtin_role(role_id: int, db: AsyncSession = Depends(get_db)):
+    """内置角色重置已禁用（内置角色只读）。"""
+    raise HTTPException(status_code=403, detail="内置角色为只读，已禁用重置")
 
 
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)

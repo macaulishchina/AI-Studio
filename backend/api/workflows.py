@@ -450,6 +450,8 @@ async def update_module(module_id: int, data: ModuleUpdate, db: AsyncSession = D
     mod = result.scalar_one_or_none()
     if not mod:
         raise HTTPException(status_code=404, detail="模块不存在")
+    if mod.is_builtin:
+        raise HTTPException(status_code=403, detail="内置模块不可编辑")
 
     update_data = data.model_dump(exclude_unset=True)
     for k, v in update_data.items():
@@ -527,6 +529,8 @@ async def update_workflow(workflow_id: int, data: WorkflowUpdate, db: AsyncSessi
     wf = result.scalar_one_or_none()
     if not wf:
         raise HTTPException(status_code=404, detail="工作流不存在")
+    if wf.is_builtin:
+        raise HTTPException(status_code=403, detail="内置工作流不可编辑")
 
     update_data = data.model_dump(exclude_unset=True)
     if "stages" in update_data and update_data["stages"] is not None:

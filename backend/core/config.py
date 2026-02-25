@@ -11,12 +11,57 @@ from typing import List, Dict
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _load_dotenv_if_exists() -> None:
+    """加载 studio/.env (不覆盖已有系统环境变量)。"""
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return
+
+    try:
+        with env_path.open("r", encoding="utf-8-sig") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                if line.startswith("export "):
+                    line = line[7:].strip()
+
+                if "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+
+                if not key:
+                    continue
+
+                # 去掉包裹引号
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                    value = value[1:-1]
+
+                os.environ.setdefault(key, value)
+    except Exception:
+        # .env 解析失败时回退到系统环境变量，不阻塞服务启动
+        pass
+
+
+_load_dotenv_if_exists()
+
+
 @dataclass
 class StudioSettings:
     """设计院配置"""
     # GitHub (可选 — 如果项目使用 GitHub)
     github_token: str = os.environ.get("GITHUB_TOKEN", "")
     github_repo: str = os.environ.get("GITHUB_REPO", "")  # e.g. "owner/repo"
+    git_provider: str = os.environ.get("GIT_PROVIDER", "github")  # github | gitlab
+
+    # GitLab (可选)
+    gitlab_url: str = os.environ.get("GITLAB_URL", "https://gitlab.com")
+    gitlab_token: str = os.environ.get("GITLAB_TOKEN", "")
+    gitlab_repo: str = os.environ.get("GITLAB_REPO", "")  # namespace/project
 
     # 工作区路径
     workspace_path: str = os.environ.get("WORKSPACE_PATH", "/workspace")

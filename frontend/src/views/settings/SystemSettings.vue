@@ -1,113 +1,5 @@
 <template>
   <n-space vertical :size="16">
-    <!-- GitHub 连接（按当前工作目录） -->
-    <n-card title="🔗 当前工作目录 GitHub 配置（可选）" size="small" style="background: #16213e">
-      <n-spin :show="checkingGithub">
-        <n-descriptions :column="1" label-placement="left" bordered>
-          <n-descriptions-item label="作用域">
-            <n-space :size="6" align="center" :wrap="true">
-              <n-tag size="small" type="info">{{ githubScopeText }}</n-tag>
-              <n-text v-if="githubStatus.scope?.workspace_label" style="font-size: 12px">
-                {{ githubStatus.scope.workspace_label }}
-              </n-text>
-              <n-text v-if="githubStatus.scope?.workspace_path" code style="font-size: 11px">
-                {{ githubStatus.scope.workspace_path }}
-              </n-text>
-            </n-space>
-          </n-descriptions-item>
-          <!-- Token 状态 -->
-          <n-descriptions-item label="Token">
-            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
-              <n-tag :type="githubStatus.masked_token ? 'success' : 'warning'" size="small">
-                {{ githubStatus.masked_token ? '已配置' : '未配置' }}
-              </n-tag>
-              <n-text v-if="githubStatus.masked_token" code style="font-size: 12px; letter-spacing: 0.5px">
-                {{ githubStatus.masked_token }}
-              </n-text>
-            </div>
-          </n-descriptions-item>
-          <!-- 仓库绑定 -->
-          <n-descriptions-item label="仓库">
-            <div style="display: flex; align-items: center; gap: 8px">
-              <n-tag :type="githubStatus.repo_configured ? 'success' : 'warning'" size="small">
-                {{ githubStatus.repo_configured ? '已绑定' : '未绑定' }}
-              </n-tag>
-              <n-text v-if="githubStatus.repo" code style="font-size: 12px">{{ githubStatus.repo }}</n-text>
-            </div>
-          </n-descriptions-item>
-          <!-- 连接状态 -->
-          <n-descriptions-item label="状态">
-            <n-tag :type="githubStatus.connected ? 'success' : (githubStatus.optional ? 'default' : 'warning')" size="small">
-              {{ githubStatus.connected ? '已连接' : (githubStatus.optional ? '可选未启用' : '未连接') }}
-            </n-tag>
-          </n-descriptions-item>
-          <!-- 分支 (连接成功时显示) -->
-          <n-descriptions-item label="默认分支" v-if="githubStatus.default_branch">
-            {{ githubStatus.default_branch }}
-          </n-descriptions-item>
-          <!-- 提示 -->
-          <n-descriptions-item label="提示" v-if="githubStatus.hint || githubStatus.error">
-            <n-text type="warning" style="font-size: 12px">{{ githubStatus.hint || githubStatus.error }}</n-text>
-          </n-descriptions-item>
-        </n-descriptions>
-      </n-spin>
-
-      <!-- 操作区 -->
-      <n-space style="margin-top: 10px" :size="8" :wrap="true">
-        <n-button size="small" @click="checkGithub" :loading="checkingGithub">🔄 重新检测</n-button>
-        <n-button size="small" type="primary" ghost @click="showTokenInput = !showTokenInput" :disabled="!isGitWorkspace">
-          {{ githubStatus.masked_token ? '🔑 更换 Token' : '🔑 设置 Token' }}
-        </n-button>
-        <n-button v-if="githubStatus.masked_token" size="small" type="error" ghost @click="handleClearToken">
-          清除 Token
-        </n-button>
-        <n-button size="small" ghost @click="showRepoInput = !showRepoInput" :disabled="!isGitWorkspace">
-          {{ githubStatus.repo_configured ? '📦 更换仓库' : '📦 绑定仓库' }}
-        </n-button>
-        <n-button v-if="githubStatus.repo_configured" size="small" type="error" ghost @click="handleClearRepo">
-          清除仓库
-        </n-button>
-      </n-space>
-
-      <!-- Token 输入区 -->
-      <div v-if="showTokenInput" style="margin-top: 10px">
-        <n-input-group>
-          <n-input
-            v-model:value="tokenInput"
-            type="password"
-            show-password-on="click"
-            placeholder="输入 GitHub Token (ghp_... / github_pat_...)"
-            clearable
-            style="flex: 1"
-          />
-          <n-button type="primary" :loading="savingToken" :disabled="!tokenInput.trim()" @click="handleSaveToken">
-            保存
-          </n-button>
-        </n-input-group>
-        <n-text depth="3" style="font-size: 11px; margin-top: 4px; display: block">
-          Token 将绑定到当前活跃工作目录（仅该目录生效）
-        </n-text>
-      </div>
-
-      <!-- Repo 输入区 -->
-      <div v-if="showRepoInput" style="margin-top: 10px">
-        <n-input-group>
-          <n-input
-            v-model:value="repoInput"
-            placeholder="owner/repo 格式, 如 myorg/myproject"
-            clearable
-            style="flex: 1"
-          />
-          <n-button type="primary" :loading="savingRepo" :disabled="!repoInput.trim()" @click="handleSaveRepo">
-            保存
-          </n-button>
-        </n-input-group>
-        <n-text depth="3" style="font-size: 11px; margin-top: 4px; display: block">
-          仓库将绑定到当前活跃工作目录（支持非 Git / 非 GitHub 目录留空）
-        </n-text>
-      </div>
-    </n-card>
-
     <!-- 工作目录管理 -->
     <n-card title="📁 工作目录管理" size="small" style="background: #16213e">
       <template #header-extra>
@@ -153,8 +45,38 @@
               </n-tag>
               <!-- 标签 -->
               <n-text strong style="font-size: 13px">{{ dir.label || dir.path.split(/[\\/]/).pop() }}</n-text>
+              <!-- 内置目录标记 -->
+              <n-tag v-if="dir.is_builtin" type="info" size="small" :bordered="false">内置（ENV）</n-tag>
               <!-- 目录不存在警告 -->
               <n-tag v-if="!dir.exists" type="error" size="small">目录不存在</n-tag>
+              <!-- 配置状态摘要（默认折叠也能看见） -->
+              <template v-if="dir.vcs_type === 'git'">
+                <n-tag size="small" type="info" :bordered="false">
+                  {{ gitProviderLabel(dir.git_provider || 'github') }}
+                </n-tag>
+                <n-tag
+                  size="small"
+                  :type="((dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_token_configured : dir.github_token_configured) ? 'success' : 'warning'"
+                  :bordered="false"
+                >
+                  Token{{ ((dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_token_configured : dir.github_token_configured) ? '已配' : '未配' }}
+                </n-tag>
+                <n-tag
+                  size="small"
+                  :type="((dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_repo : dir.github_repo) ? 'success' : 'warning'"
+                  :bordered="false"
+                >
+                  仓库{{ ((dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_repo : dir.github_repo) ? '已绑' : '未绑' }}
+                </n-tag>
+              </template>
+              <template v-else-if="dir.vcs_type === 'svn'">
+                <n-tag size="small" :type="svnRepoReady(dir) ? 'success' : 'default'" :bordered="false">
+                  SVN地址{{ svnRepoReady(dir) ? '已就绪' : '自动探测' }}
+                </n-tag>
+                <n-tag size="small" :type="dir.svn_username_configured ? 'success' : 'default'" :bordered="false">
+                  用户{{ svnUserReady(dir) ? '已识别' : '可选' }}
+                </n-tag>
+              </template>
 
               <!-- 操作按钮 (右对齐) -->
               <div style="margin-left: auto; display: flex; gap: 4px; flex-shrink: 0">
@@ -164,7 +86,7 @@
                 </n-button>
                 <n-popconfirm @positive-click="handleRemoveDir(dir)">
                   <template #trigger>
-                    <n-button size="tiny" type="error" ghost :disabled="dir.is_active && workspaceDirs.length === 1">
+                    <n-button size="tiny" type="error" ghost :disabled="dir.is_builtin">
                       移除
                     </n-button>
                   </template>
@@ -176,6 +98,240 @@
             <n-text code depth="3" style="font-size: 11px; margin-top: 4px; display: block; word-break: break-all">
               {{ dir.path }}
             </n-text>
+
+            <!-- 子项配置：默认折叠 -->
+            <n-collapse
+              v-if="dir.vcs_type === 'git' || dir.vcs_type === 'svn'"
+              :default-expanded-names="[]"
+              style="margin-top: 8px"
+            >
+              <n-collapse-item :title="dir.vcs_type === 'git' ? 'Git 平台配置' : 'SVN 配置'" :name="`cfg-${dir.id}`">
+                <!-- Git 子页 -->
+                <template v-if="dir.vcs_type === 'git'">
+                  <n-space vertical :size="8">
+                    <n-descriptions :column="1" bordered size="small" label-placement="left">
+                      <n-descriptions-item label="平台">
+                        <n-space align="center" :size="8">
+                          <n-select
+                            :value="dir.git_provider || 'github'"
+                            :options="gitProviderOptions"
+                            size="small"
+                            class="git-provider-select"
+                            style="width: 132px"
+                            @update:value="(v) => handleSetGitProvider(dir, v)"
+                          />
+                          <n-text depth="3" style="font-size: 11px">
+                            {{ (dir.git_provider || 'github') === 'gitlab' ? 'namespace/project + Token' : 'owner/repo + Token' }}
+                          </n-text>
+                        </n-space>
+                      </n-descriptions-item>
+                      <n-descriptions-item label="Token">
+                        <n-tag :type="(dir.git_provider || 'github') === 'gitlab' ? (dir.gitlab_token_configured ? 'success' : 'warning') : (dir.github_token_configured ? 'success' : 'warning')" size="small">
+                          {{ (dir.git_provider || 'github') === 'gitlab' ? (dir.gitlab_token_configured ? '已配置' : '未配置') : (dir.github_token_configured ? '已配置' : '未配置') }}
+                        </n-tag>
+                      </n-descriptions-item>
+                      <n-descriptions-item label="仓库">
+                        <n-tag :type="(dir.git_provider || 'github') === 'gitlab' ? (dir.gitlab_repo ? 'success' : 'warning') : (dir.github_repo ? 'success' : 'warning')" size="small">
+                          {{ (dir.git_provider || 'github') === 'gitlab' ? (dir.gitlab_repo ? '已绑定' : '未绑定') : (dir.github_repo ? '已绑定' : '未绑定') }}
+                        </n-tag>
+                        <n-text v-if="(dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_repo : dir.github_repo" code style="font-size: 12px; margin-left: 8px">
+                          {{ (dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_repo : dir.github_repo }}
+                        </n-text>
+                      </n-descriptions-item>
+                      <n-descriptions-item label="GitLab 地址" v-if="(dir.git_provider || 'github') === 'gitlab'">
+                        <n-text code style="font-size: 12px">{{ dir.gitlab_url || 'https://gitlab.com' }}</n-text>
+                      </n-descriptions-item>
+                      <n-descriptions-item label="连接状态" v-if="dir._validate_status">
+                        <n-tag
+                          :type="dir._validate_ok ? 'success' : 'warning'"
+                          size="small"
+                        >
+                          {{ dir._validate_ok ? '已连接' : '未连接' }}
+                        </n-tag>
+                        <n-text v-if="dir._validate_message" depth="3" style="margin-left: 8px; font-size: 11px">
+                          {{ dir._validate_message }}
+                        </n-text>
+                      </n-descriptions-item>
+                    </n-descriptions>
+
+                    <n-space :size="8" :wrap="true">
+                      <n-button size="small" @click="handleValidateDir(dir)" :loading="dir._validating">🔄 校验连接</n-button>
+                      <n-button size="small" type="primary" ghost @click="dir._showTokenInput = !dir._showTokenInput">
+                        {{ ((dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_token_configured : dir.github_token_configured) ? '🔑 更换 Token' : '🔑 设置 Token' }}
+                      </n-button>
+                      <n-button
+                        v-if="(dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_token_configured : dir.github_token_configured"
+                        size="small"
+                        type="error"
+                        ghost
+                        @click="handleClearTokenByProvider(dir)"
+                      >
+                        清除 Token
+                      </n-button>
+                      <n-button size="small" ghost @click="dir._showRepoInput = !dir._showRepoInput">
+                        {{ ((dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_repo : dir.github_repo) ? '📦 更换仓库' : '📦 绑定仓库' }}
+                      </n-button>
+                      <n-button
+                        v-if="(dir.git_provider || 'github') === 'gitlab' ? dir.gitlab_repo : dir.github_repo"
+                        size="small"
+                        type="error"
+                        ghost
+                        @click="handleClearRepoByProvider(dir)"
+                      >
+                        清除仓库
+                      </n-button>
+                      <n-button
+                        v-if="(dir.git_provider || 'github') === 'gitlab'"
+                        size="small"
+                        ghost
+                        @click="dir._showGitlabUrlInput = !dir._showGitlabUrlInput"
+                      >
+                        🌐 设置 GitLab 地址
+                      </n-button>
+                    </n-space>
+
+                    <div v-if="dir._showTokenInput" style="margin-top: 6px">
+                        <n-input-group>
+                          <n-input
+                            v-model:value="dir._tokenInput"
+                            type="password"
+                            show-password-on="click"
+                            :placeholder="(dir.git_provider || 'github') === 'gitlab' ? '输入 GitLab Token (PAT / Project Token)' : '输入 GitHub Token (ghp_... / github_pat_...)'"
+                            clearable
+                            style="flex: 1"
+                          />
+                          <n-button type="primary" :loading="savingToken" :disabled="!(dir._tokenInput || '').trim()" @click="handleSaveTokenByProvider(dir)">
+                            保存
+                          </n-button>
+                        </n-input-group>
+                    </div>
+
+                    <div v-if="dir._showRepoInput" style="margin-top: 6px">
+                        <n-input-group>
+                          <n-input
+                            v-model:value="dir._repoInput"
+                            :placeholder="(dir.git_provider || 'github') === 'gitlab' ? 'namespace/project 格式, 如 mygroup/myproject' : 'owner/repo 格式, 如 myorg/myproject'"
+                            clearable
+                            style="flex: 1"
+                          />
+                          <n-button type="primary" :loading="savingRepo" :disabled="!(dir._repoInput || '').trim()" @click="handleSaveRepoByProvider(dir)">
+                            保存
+                          </n-button>
+                        </n-input-group>
+                    </div>
+
+                    <div v-if="dir._showGitlabUrlInput && (dir.git_provider || 'github') === 'gitlab'" style="margin-top: 6px">
+                        <n-input-group>
+                          <n-input
+                            v-model:value="dir._gitlabUrlInput"
+                            placeholder="GitLab 地址, 如 https://gitlab.com 或 https://gitlab.company.com"
+                            clearable
+                            style="flex: 1"
+                          />
+                          <n-button type="primary" :loading="savingGitlabUrl" :disabled="!(dir._gitlabUrlInput || '').trim()" @click="handleSaveGitlabUrl(dir)">
+                            保存
+                          </n-button>
+                        </n-input-group>
+                    </div>
+                  </n-space>
+                </template>
+
+                <!-- SVN 子页 -->
+                <template v-else>
+                  <n-space vertical :size="8">
+                    <n-descriptions :column="1" bordered size="small" label-placement="left">
+                      <n-descriptions-item label="SVN 仓库地址">
+                        <n-tag :type="dir.svn_repo_configured ? 'info' : 'success'" size="small">
+                          {{ dir.svn_repo_configured ? '已手动配置' : '自动探测（推荐）' }}
+                        </n-tag>
+                        <n-text v-if="dir.svn_repo_url" code style="margin-left: 8px; font-size: 12px">{{ dir.svn_repo_url }}</n-text>
+                        <n-text
+                          v-else-if="dir._validate_status?.repo_url"
+                          code
+                          style="margin-left: 8px; font-size: 12px"
+                        >
+                          {{ dir._validate_status.repo_url }}
+                        </n-text>
+                      </n-descriptions-item>
+                      <n-descriptions-item label="SVN 用户名">
+                        <n-tag :type="dir.svn_username_configured ? 'warning' : 'success'" size="small">
+                          {{ dir.svn_username_configured ? '已手动配置' : '系统凭据（推荐）' }}
+                        </n-tag>
+                        <n-text
+                          v-if="dir._validate_status?.username"
+                          code
+                          style="margin-left: 8px; font-size: 12px"
+                        >
+                          {{ dir._validate_status.username }}
+                        </n-text>
+                        <n-text
+                          v-else
+                          depth="3"
+                          style="margin-left: 8px; font-size: 11px"
+                        >
+                          未返回登录用户名（正常，取决于 SVN 客户端与凭据缓存）
+                        </n-text>
+                        <n-text
+                          v-if="dir._validate_status?.last_changed_author"
+                          depth="3"
+                          style="margin-left: 8px; font-size: 11px"
+                        >
+                          最近提交者: {{ dir._validate_status.last_changed_author }}
+                        </n-text>
+                      </n-descriptions-item>
+                      <n-descriptions-item label="Trunk 路径">
+                        <n-text code style="font-size: 12px">{{ dir.svn_trunk_path || 'trunk' }}</n-text>
+                      </n-descriptions-item>
+                    </n-descriptions>
+                    <n-alert type="info" :bordered="false" style="background: rgba(32,128,240,.08)">
+                      默认使用系统 SVN 环境和当前工作副本自动探测；仅在权限不足时再填写覆盖参数。
+                    </n-alert>
+                    <n-space :size="8" align="center">
+                      <n-button size="small" @click="handleValidateDir(dir)" :loading="dir._validating">🔍 校验 SVN 可用性</n-button>
+                      <n-tag v-if="dir._validate_status" :type="dir._validate_ok ? 'success' : 'warning'" size="small">
+                        {{ dir._validate_ok ? '可用' : '不可用' }}
+                      </n-tag>
+                      <n-text v-if="dir._validate_message" depth="3" style="font-size: 11px">{{ dir._validate_message }}</n-text>
+                    </n-space>
+
+                    <n-collapse :default-expanded-names="[]">
+                      <n-collapse-item :name="`svn-adv-${dir.id}`" title="高级覆盖参数（仅权限不足时使用）">
+                        <n-grid :cols="2" :x-gap="8" :y-gap="8">
+                          <n-gi>
+                            <n-input v-model:value="dir._svnRepoUrlInput" placeholder="可选: SVN_REPO_URL 覆盖地址" clearable />
+                          </n-gi>
+                          <n-gi>
+                            <n-input v-model:value="dir._svnTrunkPathInput" placeholder="可选: trunk 路径 (默认 trunk)" clearable />
+                          </n-gi>
+                          <n-gi>
+                            <n-input
+                              v-model:value="dir._svnUsernameInput"
+                              placeholder="可选: SVN 用户名 (默认系统凭据)"
+                              clearable
+                              autocomplete="off"
+                            />
+                          </n-gi>
+                          <n-gi>
+                            <n-input
+                              v-model:value="dir._svnPasswordInput"
+                              type="password"
+                              show-password-on="click"
+                              placeholder="可选: SVN 密码"
+                              clearable
+                              autocomplete="new-password"
+                            />
+                          </n-gi>
+                        </n-grid>
+                        <n-space :size="8" style="margin-top: 8px">
+                          <n-button size="small" type="primary" ghost @click="handleSaveSvnOverride(dir)">保存覆盖参数</n-button>
+                          <n-button size="small" ghost @click="handleResetSvnOverride(dir)">恢复自动模式</n-button>
+                        </n-space>
+                      </n-collapse-item>
+                    </n-collapse>
+                  </n-space>
+                </template>
+              </n-collapse-item>
+            </n-collapse>
           </div>
         </n-space>
         <n-empty v-else description="尚未配置工作目录，点击上方「添加目录」开始" />
@@ -430,17 +586,14 @@ import { systemApi, endpointProbeApi, workspaceDirApi } from '@/api'
 const message = useMessage()
 
 const githubStatus = ref<any>({})
+const gitlabStatus = ref<any>({})
 const systemStatus = ref<any>(null)
-const checkingGithub = ref(false)
 const loadingStatus = ref(false)
 
 // GitHub Token / Repo 管理
-const showTokenInput = ref(false)
-const showRepoInput = ref(false)
-const tokenInput = ref('')
-const repoInput = ref('')
 const savingToken = ref(false)
 const savingRepo = ref(false)
+const savingGitlabUrl = ref(false)
 
 // 工作目录管理
 const workspaceDirs = ref<any[]>([])
@@ -459,6 +612,10 @@ const probeEndpoints = ref<any[]>([])
 const probingAll = ref(false)
 const probeResult = ref<any>(null)
 
+// SVN 校验缓存：避免每次刷新都打 svn 命令
+const SVN_VALIDATE_TTL_MS = 2 * 60 * 1000
+const svnValidateCache = new Map<number, { ts: number; ok: boolean; status: any }>()
+
 // ── VCS 兼容 ──────────────────────────────
 const vcsLabel = computed(() => {
   const t = systemStatus.value?.vcs?.type || workspaceOverview.value?.vcs_type
@@ -471,13 +628,22 @@ const recentCommitLines = computed(() => {
   // 优先使用新格式（向后兼容旧 git 字段）
   return systemStatus.value?.git?.recent_commits || []
 })
+const gitProviderOptions = [
+  { label: 'GitHub', value: 'github' },
+  { label: 'GitLab', value: 'gitlab' },
+]
 
-const isGitWorkspace = computed(() => githubStatus.value?.scope?.vcs_type === 'git')
-const githubScopeText = computed(() => {
-  const source = githubStatus.value?.scope?.source
-  if (source === 'workspace') return '当前工作目录'
-  return '运行时'
-})
+function gitProviderLabel(provider: string) {
+  return (provider || 'github').toLowerCase() === 'gitlab' ? 'GitLab' : 'GitHub'
+}
+
+function svnRepoReady(dir: any): boolean {
+  return !!(dir?.svn_repo_configured || dir?._validate_status?.repo_url)
+}
+
+function svnUserReady(dir: any): boolean {
+  return !!(dir?.svn_username_configured || dir?._validate_status?.username)
+}
 
 // ── 语言颜色 ──────────────────────────────
 const LANG_COLORS: Record<string, string> = {
@@ -536,27 +702,22 @@ async function probeOne(ep: any) {
   }
 }
 
-async function checkGithub() {
-  checkingGithub.value = true
-  try {
-    const { data } = await systemApi.status()
-    githubStatus.value = data.github || {}
-  } catch {
-    githubStatus.value = { connected: false, error: '无法连接设计院服务' }
-  } finally {
-    checkingGithub.value = false
-  }
-}
-
-async function handleSaveToken() {
+async function handleSaveTokenByProvider(dir: any) {
   savingToken.value = true
   try {
-    await systemApi.setGithubToken(tokenInput.value.trim())
-    message.success('GitHub Token 已保存')
-    tokenInput.value = ''
-    showTokenInput.value = false
-    // 重新检测连接状态
-    await checkGithub()
+    const p = (dir.git_provider || 'github').toLowerCase()
+    const token = (dir._tokenInput || '').trim()
+    if (!token) return
+    if (p === 'gitlab') {
+      await workspaceDirApi.update(dir.id, { gitlab_token: token })
+      message.success('GitLab Token 已保存')
+    } else {
+      await workspaceDirApi.update(dir.id, { github_token: token })
+      message.success('GitHub Token 已保存')
+    }
+    dir._tokenInput = ''
+    dir._showTokenInput = false
+    await fetchWorkspaceDirs()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '保存失败')
   } finally {
@@ -564,38 +725,180 @@ async function handleSaveToken() {
   }
 }
 
-async function handleClearToken() {
+async function handleClearTokenByProvider(dir: any) {
   try {
-    await systemApi.clearGithubToken()
-    message.success('GitHub Token 已清除')
-    await checkGithub()
+    const p = (dir.git_provider || 'github').toLowerCase()
+    if (p === 'gitlab') {
+      await workspaceDirApi.update(dir.id, { gitlab_token: '' })
+      message.success('GitLab Token 已清除')
+    } else {
+      await workspaceDirApi.update(dir.id, { github_token: '' })
+      message.success('GitHub Token 已清除')
+    }
+    await fetchWorkspaceDirs()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '清除失败')
   }
 }
 
-async function handleClearRepo() {
+async function handleClearRepoByProvider(dir: any) {
   try {
-    await systemApi.clearGithubRepo()
-    message.success('GitHub 仓库已清除')
-    await checkGithub()
+    const p = (dir.git_provider || 'github').toLowerCase()
+    if (p === 'gitlab') {
+      await workspaceDirApi.update(dir.id, { gitlab_repo: '' })
+      message.success('GitLab 仓库已清除')
+    } else {
+      await workspaceDirApi.update(dir.id, { github_repo: '' })
+      message.success('GitHub 仓库已清除')
+    }
+    await fetchWorkspaceDirs()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '清除失败')
   }
 }
 
-async function handleSaveRepo() {
+async function handleSaveRepoByProvider(dir: any) {
   savingRepo.value = true
   try {
-    await systemApi.setGithubRepo(repoInput.value.trim())
-    message.success('GitHub 仓库已绑定')
-    repoInput.value = ''
-    showRepoInput.value = false
-    await checkGithub()
+    const p = (dir.git_provider || 'github').toLowerCase()
+    const repo = (dir._repoInput || '').trim()
+    if (!repo) return
+    if (p === 'gitlab') {
+      await workspaceDirApi.update(dir.id, { gitlab_repo: repo })
+      message.success('GitLab 仓库已绑定')
+    } else {
+      await workspaceDirApi.update(dir.id, { github_repo: repo })
+      message.success('GitHub 仓库已绑定')
+    }
+    dir._repoInput = ''
+    dir._showRepoInput = false
+    await fetchWorkspaceDirs()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '保存失败')
   } finally {
     savingRepo.value = false
+  }
+}
+
+async function handleSetGitProvider(dir: any, provider: 'github' | 'gitlab') {
+  try {
+    await workspaceDirApi.update(dir.id, { git_provider: provider })
+    message.success(`已切换 Git 平台: ${provider.toUpperCase()}`)
+    await fetchWorkspaceDirs()
+  } catch (e: any) {
+    message.error(e.response?.data?.detail || '切换平台失败')
+  }
+}
+
+async function handleSaveGitlabUrl(dir: any) {
+  savingGitlabUrl.value = true
+  try {
+    const url = (dir._gitlabUrlInput || '').trim()
+    if (!url) return
+    await workspaceDirApi.update(dir.id, { gitlab_url: url })
+    dir._showGitlabUrlInput = false
+    dir._gitlabUrlInput = ''
+    message.success('GitLab 地址已保存')
+    await fetchWorkspaceDirs()
+  } catch (e: any) {
+    message.error(e.response?.data?.detail || '保存失败')
+  } finally {
+    savingGitlabUrl.value = false
+  }
+}
+
+async function handleValidateDir(dir: any) {
+  // 优先使用新鲜缓存
+  const cached = svnValidateCache.get(dir.id)
+  if (cached && (Date.now() - cached.ts) < SVN_VALIDATE_TTL_MS) {
+    dir._validate_status = cached.status || null
+    dir._validate_ok = !!cached.ok
+    dir._validate_message = cached.status?.message || cached.status?.hint || ''
+    return
+  }
+
+  dir._validating = true
+  try {
+    const { data } = await workspaceDirApi.validate(dir.id)
+    dir._validate_status = data?.status || null
+    dir._validate_ok = !!data?.ok
+    dir._validate_message = data?.status?.message || data?.status?.hint || ''
+    svnValidateCache.set(dir.id, {
+      ts: Date.now(),
+      ok: !!data?.ok,
+      status: data?.status || null,
+    })
+    if (data?.ok) message.success('配置校验通过')
+    else message.warning(dir._validate_message || '配置不可用')
+  } catch (e: any) {
+    dir._validate_ok = false
+    dir._validate_message = e.response?.data?.detail || e.message || '校验失败'
+    message.error(dir._validate_message)
+  } finally {
+    dir._validating = false
+  }
+}
+
+async function autoRefreshSvnValidation(dirs: any[]) {
+  // 仅对 SVN 目录做静默刷新：先用缓存，缓存过期则后台校验并更新 UI
+  for (const dir of dirs) {
+    if (dir.vcs_type !== 'svn') continue
+
+    const cached = svnValidateCache.get(dir.id)
+    if (cached && (Date.now() - cached.ts) < SVN_VALIDATE_TTL_MS) {
+      dir._validate_status = cached.status || null
+      dir._validate_ok = !!cached.ok
+      dir._validate_message = cached.status?.message || cached.status?.hint || ''
+      continue
+    }
+
+    try {
+      dir._validating = true
+      const { data } = await workspaceDirApi.validate(dir.id)
+      dir._validate_status = data?.status || null
+      dir._validate_ok = !!data?.ok
+      dir._validate_message = data?.status?.message || data?.status?.hint || ''
+      svnValidateCache.set(dir.id, {
+        ts: Date.now(),
+        ok: !!data?.ok,
+        status: data?.status || null,
+      })
+    } catch {
+      // 静默自动刷新，不弹消息
+    } finally {
+      dir._validating = false
+    }
+  }
+}
+
+async function handleSaveSvnOverride(dir: any) {
+  try {
+    await workspaceDirApi.update(dir.id, {
+      svn_repo_url: (dir._svnRepoUrlInput || '').trim(),
+      svn_username: (dir._svnUsernameInput || '').trim(),
+      svn_password: (dir._svnPasswordInput || '').trim(),
+      svn_trunk_path: (dir._svnTrunkPathInput || '').trim() || 'trunk',
+    })
+    svnValidateCache.delete(dir.id)
+    message.success('SVN 覆盖参数已保存')
+    await fetchWorkspaceDirs()
+  } catch (e: any) {
+    message.error(e.response?.data?.detail || '保存失败')
+  }
+}
+
+async function handleResetSvnOverride(dir: any) {
+  try {
+    await workspaceDirApi.update(dir.id, {
+      svn_repo_url: '',
+      svn_username: '',
+      svn_password: '',
+    })
+    svnValidateCache.delete(dir.id)
+    message.success('已恢复为系统自动模式')
+    await fetchWorkspaceDirs()
+  } catch (e: any) {
+    message.error(e.response?.data?.detail || '重置失败')
   }
 }
 
@@ -605,6 +908,7 @@ async function fetchStatus() {
     const { data } = await systemApi.status()
     systemStatus.value = data
     githubStatus.value = data.github || {}
+    gitlabStatus.value = data.gitlab || {}
   } catch {}
   finally { loadingStatus.value = false }
 }
@@ -626,7 +930,30 @@ async function fetchWorkspaceDirs() {
   loadingDirs.value = true
   try {
     const { data } = await workspaceDirApi.list()
-    workspaceDirs.value = data.map((d: any) => ({ ...d, _switching: false }))
+    workspaceDirs.value = data.map((d: any) => {
+      const cached = svnValidateCache.get(d.id)
+      const cacheValid = !!cached && (Date.now() - cached.ts) < SVN_VALIDATE_TTL_MS
+      return ({
+      ...d,
+      _switching: false,
+      _validating: false,
+      _validate_ok: cacheValid ? !!cached?.ok : null,
+      _validate_message: cacheValid ? (cached?.status?.message || cached?.status?.hint || '') : '',
+      _validate_status: cacheValid ? (cached?.status || null) : null,
+      _showTokenInput: false,
+      _showRepoInput: false,
+      _showGitlabUrlInput: false,
+      _tokenInput: '',
+      _repoInput: '',
+      _gitlabUrlInput: d.gitlab_url || 'https://gitlab.com',
+      _svnRepoUrlInput: d.svn_repo_url || '',
+      _svnUsernameInput: d.svn_username || '',
+      _svnPasswordInput: '',
+      _svnTrunkPathInput: d.svn_trunk_path || 'trunk',
+    })
+    })
+    // 默认静默刷新 SVN 详细信息（带 TTL 缓存）
+    autoRefreshSvnValidation(workspaceDirs.value)
   } catch (e: any) {
     console.warn('加载工作目录列表失败', e)
   } finally {
@@ -700,6 +1027,10 @@ onMounted(() => {
 .sys-col-status { width: 90px; }
 .sys-col-latency { width: 70px; }
 .sys-col-action { width: 56px; }
+
+.git-provider-select :deep(.n-base-selection) {
+  background: rgba(255, 255, 255, 0.04);
+}
 
 @media (max-width: 768px) {
   .sys-col-group { display: none; }

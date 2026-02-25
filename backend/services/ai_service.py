@@ -25,6 +25,7 @@ import json
 import logging
 import mimetypes
 import os
+import platform
 import re
 import time
 import uuid
@@ -55,7 +56,7 @@ logger = logging.getLogger(__name__)
 # 应用实例级 session ID (启动时生成一次, 稳定用于计费关联)
 _STUDIO_SESSION_ID = str(uuid.uuid4()) + str(int(time.time() * 1000))
 _STUDIO_MACHINE_ID = hashlib.sha256(
-    f"{os.uname().nodename}-{settings.data_path}-studio".encode()
+    f"{platform.node()}-{settings.data_path}-studio".encode()
 ).hexdigest()
 
 

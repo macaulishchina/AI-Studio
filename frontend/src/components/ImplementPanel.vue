@@ -90,10 +90,10 @@
         <n-descriptions-item label="状态">
           <n-space align="center" :size="6">
             <n-tag :type="implStatusType" size="small">{{ implStatusText }}</n-tag>
-            <n-tag v-if="implStatus.copilot_assigned" type="success" size="small" :bordered="false">
+            <n-tag v-if="implStatus.copilot_assigned || agentEverWorked" type="success" size="small" :bordered="false">
               🤖 Agent 已分配
             </n-tag>
-            <n-tag v-else-if="implStatus.github_issue_number && implStatus.status !== 'not_started'" type="warning" size="small" :bordered="false">
+            <n-tag v-else-if="implStatus.github_issue_number && implStatus.status === 'task_created'" type="warning" size="small" :bordered="false">
               ⚠️ Agent 未分配
             </n-tag>
           </n-space>
@@ -341,6 +341,16 @@ const sessionStatusText = computed(() => {
 })
 
 // ── 状态计算 ──────────────────────────────────────────────────
+
+// Agent 曾经工作的证据 (copilot/* 分支存在, 或状态已进入编码/完成阶段)
+const agentEverWorked = computed(() => {
+  const s = implStatus.value?.status
+  const branch = implStatus.value?.branch_name || ''
+  return (
+    branch.startsWith('copilot/') ||
+    ['agent_working', 'agent_done', 'pr_created', 'pr_merged'].includes(s)
+  )
+})
 
 const isImplementing = computed(() =>
   ['implementing', 'reviewing'].includes(props.project.status) && !!implStatus.value?.github_issue_number

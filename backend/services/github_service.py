@@ -607,6 +607,9 @@ async def get_issue_copilot_session_info(
                 info["pr_url"] = pr.get("html_url")
                 info["pr_state"] = pr.get("state")
                 info["branch"] = branch
+                # copilot/* 分支的 PR 存在即证明 Agent 曾经工作过
+                # (Agent 完成后会自动取消 assignee, 不能仅靠 assignees 判断)
+                info["copilot_assigned"] = True
                 if pr.get("merged"):
                     info["copilot_status"] = "merged"
                 elif pr.get("draft"):

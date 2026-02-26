@@ -428,7 +428,13 @@ async def get_implementation_status(
                     project.github_pr_number = pr["number"]
                     project.branch_name = branch
                     project.updated_at = datetime.utcnow()
+                    # copilot/* 分支存在即证明 Agent 曾经工作
+                    status_info.copilot_assigned = True
                     break
+
+        # copilot/* 分支名本身就是 Agent 曾工作的证据
+        if project.branch_name and project.branch_name.startswith("copilot/"):
+            status_info.copilot_assigned = True
 
         # ---- Step 2: 检查 workflow 状态 (核心监控) ----
         branch = project.branch_name

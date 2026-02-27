@@ -1,244 +1,258 @@
 <template>
-  <div>
-    <!-- 预检面板 -->
-    <n-card v-if="preflightResult && !preflightResult.ready" style="background: #16213e; margin-bottom: 16px">
-      <template #header>
-        <n-space align="center" :size="8">
-          <span>⚠️ 预检未通过</span>
-          <n-button size="tiny" @click="runPreflight" :loading="preflighting" quaternary>重新检查</n-button>
-        </n-space>
-      </template>
-      <n-space vertical :size="6">
-        <div v-for="c in preflightResult.checks" :key="c.name" style="display: flex; align-items: center; gap: 8px; font-size: 13px">
-          <span>{{ c.passed ? '✅' : '❌' }}</span>
-          <b>{{ c.name }}</b>
-          <n-text depth="3" style="font-size: 12px">{{ c.detail }}</n-text>
-        </div>
-        <n-alert v-if="preflightResult.errors?.length" type="warning" :bordered="false" style="margin-top: 8px">
-          <div v-for="(e, i) in preflightResult.errors" :key="i" style="font-size: 12px">{{ e }}</div>
-        </n-alert>
-      </n-space>
-    </n-card>
-
-    <!-- 实施控制 -->
-    <n-card style="background: #16213e; margin-bottom: 16px">
-      <n-space vertical :size="12">
-        <n-space align="center" :size="12" :wrap="true">
-          <n-tooltip trigger="hover" placement="bottom">
-            <template #trigger>
-              <n-input
-                v-model:value="baseBranch"
-                size="small"
-                style="width: 160px; min-width: 100px"
-                placeholder="基础分支"
-              >
-                <template #prefix>🌿</template>
-              </n-input>
-            </template>
-            <div style="max-width: 280px; font-size: 12px">
-              <b>基础分支</b>: Copilot Agent 将基于此分支创建 PR。<br>
-              通常为 <code>main</code> 或 <code>master</code>。
-            </div>
-          </n-tooltip>
-          <n-button
-            type="primary"
-            @click="handleStartImplementation"
-            :loading="starting"
-            :disabled="!project.plan_content || isImplementing"
-          >
-            🚀 发起实施
-          </n-button>
-          <n-button @click="refreshStatus" :loading="polling" size="small">
-            🔄 刷新状态
-          </n-button>
-          <!-- 会话追踪链接 -->
-          <n-button
-            v-if="implStatus?.github_issue_number"
-            text
-            tag="a"
-            href="https://github.com/copilot/agents"
-            target="_blank"
-            size="small"
-            type="info"
-          >
-            📡 查看 Agent 会话
-          </n-button>
-        </n-space>
-        <n-input
-          v-model:value="customInstructions"
-          type="textarea"
-          size="small"
-          placeholder="附加指令 (可选) — 给 Copilot Agent 的额外提示"
-          :autosize="{ minRows: 2, maxRows: 5 }"
-        />
-      </n-space>
-    </n-card>
-
-    <!-- 进度面板 -->
-    <n-card style="background: #16213e; margin-bottom: 16px">
-      <n-steps :current="implStep" size="small">
-        <n-step title="创建任务" :status="stepStatus(1)" description="创建 Issue 并分配 Agent" />
-        <n-step title="Agent 编码" :status="stepStatus(2)" :description="workflowDesc" />
-        <n-step title="编码完成" :status="stepStatus(3)" description="Workflow 执行结束" />
-        <n-step title="进入审查" :status="stepStatus(4)" description="AI 审查实现质量" />
-      </n-steps>
-    </n-card>
-
-    <!-- 状态详情 -->
-    <n-card v-if="implStatus" style="background: #16213e; margin-bottom: 16px">
-      <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" bordered size="small">
-        <n-descriptions-item label="状态">
-          <n-space align="center" :size="6">
-            <n-tag :type="implStatusType" size="small">{{ implStatusText }}</n-tag>
-            <n-tag v-if="implStatus.copilot_assigned || agentEverWorked" type="success" size="small" :bordered="false">
-              🤖 Agent 已分配
-            </n-tag>
-            <n-tag v-else-if="implStatus.github_issue_number && implStatus.status === 'task_created'" type="warning" size="small" :bordered="false">
-              ⚠️ Agent 未分配
-            </n-tag>
-          </n-space>
-        </n-descriptions-item>
-        <n-descriptions-item label="Issue" v-if="implStatus.github_issue_number && repoName">
-          <n-button text tag="a" :href="`https://github.com/${repoName}/issues/${implStatus.github_issue_number}`" target="_blank">
-            #{{ implStatus.github_issue_number }}
-          </n-button>
-        </n-descriptions-item>
-        <n-descriptions-item label="PR" v-if="implStatus.github_pr_number">
-          <n-button text tag="a" :href="implStatus.pr_url" target="_blank">
-            #{{ implStatus.github_pr_number }} - {{ implStatus.pr_title }}
-          </n-button>
-        </n-descriptions-item>
-        <n-descriptions-item label="分支" v-if="implStatus.branch_name">
-          <n-tag size="small" :bordered="false">{{ implStatus.branch_name }}</n-tag>
-        </n-descriptions-item>
-        <!-- Workflow 状态 -->
-        <n-descriptions-item label="Workflow" v-if="implStatus.workflow_status">
-          <n-space align="center" :size="6">
-            <n-tag :type="workflowTagType" size="small">
-              {{ workflowStatusText }}
-            </n-tag>
-            <n-button
-              v-if="implStatus.workflow_url"
-              text
-              tag="a"
-              :href="implStatus.workflow_url"
-              target="_blank"
-              size="small"
-            >
-              查看 →
-            </n-button>
-          </n-space>
-        </n-descriptions-item>
-        <n-descriptions-item label="变更文件" v-if="implStatus.pr_files_changed">
-          {{ implStatus.pr_files_changed }} 个文件
-        </n-descriptions-item>
-      </n-descriptions>
-
-      <!-- Agent 未分配警告 + 手动重试 -->
-      <n-alert
-        v-if="implStatus.github_issue_number && !implStatus.copilot_assigned && implStatus.status !== 'not_started' && implStatus.status !== 'agent_working' && implStatus.status !== 'agent_done'"
-        type="warning"
-        style="margin-top: 12px"
-        :bordered="false"
-      >
-        <template #header>Copilot Agent 未成功分配</template>
-        <div style="font-size: 12px">
-          Issue 已创建但 Copilot 未被分配。可能原因:
-          <ul style="margin: 4px 0; padding-left: 20px">
-            <li>Copilot Coding Agent 未在仓库中启用</li>
-            <li>Token 权限不足 (需要 Issues + Pull Requests 的 Read &amp; Write)</li>
-            <li>仓库 Ruleset 限制了 Bot 操作</li>
-          </ul>
-          <n-space :size="8" style="margin-top: 8px">
-            <n-button
-              size="small"
-              type="primary"
-              tag="a"
-              :href="implStatus.issue_url || `https://github.com/${repoName}/issues/${implStatus.github_issue_number}`"
-              target="_blank"
-            >
-              在 GitHub 上手动分配
-            </n-button>
-            <n-button size="small" @click="refreshStatus">
-              🔄 重新检查
-            </n-button>
-          </n-space>
-        </div>
-      </n-alert>
-    </n-card>
-
-    <!-- 编码过程查看器 (session 信息) -->
-    <n-card
-      v-if="sessionInfo && sessionInfo.has_session"
-      style="background: #16213e; margin-bottom: 16px"
+  <div class="impl-panel">
+    <!-- ═══════════ 预检警告 (仅预检未通过时) ═══════════ -->
+    <n-alert
+      v-if="preflightResult && !preflightResult.ready"
+      type="warning"
+      :bordered="false"
+      closable
+      style="margin-bottom: 16px"
     >
       <template #header>
         <n-space align="center" :size="8">
-          <span>📡 编码过程</span>
-          <n-button size="tiny" @click="loadSession" :loading="loadingSession" quaternary>刷新</n-button>
+          预检未通过
+          <n-button size="tiny" @click="runPreflight" :loading="preflighting" quaternary>重新检查</n-button>
         </n-space>
       </template>
-      <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" bordered size="small">
-        <n-descriptions-item label="Copilot 状态">
-          <n-tag :type="sessionStatusType" size="small">{{ sessionStatusText }}</n-tag>
-        </n-descriptions-item>
-        <n-descriptions-item label="Agent 会话">
-          <n-button text tag="a" :href="sessionInfo.session_url" target="_blank" type="info" size="small">
-            在 GitHub 上查看会话日志 →
+      <div style="display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 4px">
+        <div v-for="c in preflightResult.checks" :key="c.name" style="display: flex; align-items: center; gap: 6px; font-size: 13px">
+          <span>{{ c.passed ? '✅' : '❌' }}</span>
+          <span style="font-weight: 500">{{ c.name }}</span>
+          <n-text depth="3" style="font-size: 12px">{{ c.detail }}</n-text>
+        </div>
+      </div>
+    </n-alert>
+
+    <!-- ═══════════ 区域 1: 操作栏 ═══════════ -->
+    <n-card style="background: #16213e; margin-bottom: 16px" :content-style="{ padding: '16px' }">
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+        <!-- 分支选择 -->
+        <n-tooltip trigger="hover" placement="bottom">
+          <template #trigger>
+            <n-input
+              v-model:value="baseBranch"
+              size="small"
+              style="width: 140px"
+              placeholder="基础分支"
+              :disabled="isImplementing"
+            >
+              <template #prefix><span style="font-size: 13px">🌿</span></template>
+            </n-input>
+          </template>
+          Copilot Agent 将基于此分支创建 PR
+        </n-tooltip>
+
+        <!-- 发起 / 刷新 -->
+        <n-button
+          type="primary"
+          size="small"
+          @click="handleStartImplementation"
+          :loading="starting"
+          :disabled="!project.plan_content || isImplementing"
+        >
+          🚀 发起实施
+        </n-button>
+        <n-button @click="refreshStatus" :loading="polling" size="small" quaternary>
+          🔄 刷新
+        </n-button>
+
+        <!-- 快捷链接 (已有 Issue 后显示) -->
+        <template v-if="implStatus?.github_issue_number">
+          <n-divider vertical style="margin: 0 2px" />
+          <n-button
+            v-if="implStatus.github_issue_number && repoName"
+            text size="small" tag="a"
+            :href="`https://github.com/${repoName}/issues/${implStatus.github_issue_number}`"
+            target="_blank"
+          >
+            Issue #{{ implStatus.github_issue_number }}
           </n-button>
-        </n-descriptions-item>
-        <n-descriptions-item label="Issue" v-if="sessionInfo.issue_url">
-          <n-button text tag="a" :href="sessionInfo.issue_url" target="_blank" size="small">
-            #{{ sessionInfo.issue_number }} →
+          <n-button
+            v-if="implStatus.github_pr_number"
+            text size="small" tag="a" type="info"
+            :href="implStatus.pr_url"
+            target="_blank"
+          >
+            PR #{{ implStatus.github_pr_number }}
           </n-button>
-        </n-descriptions-item>
-        <n-descriptions-item label="PR" v-if="sessionInfo.pr_url">
-          <n-button text tag="a" :href="sessionInfo.pr_url" target="_blank" size="small">
-            #{{ sessionInfo.pr_number }} →
+          <n-button
+            text size="small" tag="a"
+            href="https://github.com/copilot/agents"
+            target="_blank"
+            style="opacity: 0.7"
+          >
+            📡 会话日志
           </n-button>
-        </n-descriptions-item>
-        <n-descriptions-item label="分支" v-if="sessionInfo.branch">
-          <n-tag size="small" :bordered="false">{{ sessionInfo.branch }}</n-tag>
-        </n-descriptions-item>
-      </n-descriptions>
-      <n-alert type="info" :bordered="false" style="margin-top: 12px; font-size: 12px">
-        💡 可以在
+        </template>
+
+        <!-- 右侧状态 pill -->
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 6px">
+          <n-tag v-if="implStatus" :type="implStatusType" size="small" round>
+            {{ implStatusText }}
+          </n-tag>
+          <n-tag
+            v-if="implStatus?.copilot_assigned || agentEverWorked"
+            type="success" size="small" round :bordered="false"
+          >
+            🤖 Agent
+          </n-tag>
+          <n-tag
+            v-else-if="implStatus?.github_issue_number && implStatus?.status === 'task_created'"
+            type="warning" size="small" round :bordered="false"
+          >
+            ⚠️ 未分配
+          </n-tag>
+        </div>
+      </div>
+
+      <!-- 附加指令 (仅未开始/刚创建时展开, 其余折叠) -->
+      <n-collapse
+        v-if="!isImplementing || implStatus?.status === 'task_created'"
+        :default-expanded-names="isImplementing ? [] : ['instructions']"
+        style="margin-top: 12px"
+      >
+        <n-collapse-item name="instructions" title="附加指令 (可选)">
+          <n-input
+            v-model:value="customInstructions"
+            type="textarea"
+            size="small"
+            placeholder="给 Copilot Agent 的额外提示，如架构约束、编码风格等"
+            :autosize="{ minRows: 2, maxRows: 5 }"
+          />
+        </n-collapse-item>
+      </n-collapse>
+    </n-card>
+
+    <!-- ═══════════ 区域 2: 进度 + 状态 (合并为一张卡) ═══════════ -->
+    <n-card
+      v-if="implStatus && implStatus.status !== 'not_started'"
+      style="background: #16213e; margin-bottom: 16px"
+      :content-style="{ padding: '20px' }"
+    >
+      <!-- 进度条 -->
+      <n-steps :current="implStep" size="small" style="margin-bottom: 20px">
+        <n-step title="创建任务" :status="stepStatus(1)" />
+        <n-step title="Agent 编码" :status="stepStatus(2)" />
+        <n-step title="编码完成" :status="stepStatus(3)" />
+        <n-step title="进入审查" :status="stepStatus(4)" />
+      </n-steps>
+
+      <!-- 信息网格: 替代冗余的 descriptions -->
+      <div class="info-grid">
+        <!-- PR 信息 -->
+        <div v-if="implStatus.github_pr_number" class="info-item">
+          <span class="info-label">PR</span>
+          <n-button text tag="a" :href="implStatus.pr_url" target="_blank" size="small">
+            #{{ implStatus.github_pr_number }} — {{ implStatus.pr_title }}
+          </n-button>
+        </div>
+
+        <!-- 分支 -->
+        <div v-if="implStatus.branch_name" class="info-item">
+          <span class="info-label">分支</span>
+          <n-tag size="small" :bordered="false" style="font-family: monospace; font-size: 12px">
+            {{ implStatus.branch_name }}
+          </n-tag>
+        </div>
+
+        <!-- Workflow -->
+        <div v-if="implStatus.workflow_status" class="info-item">
+          <span class="info-label">Workflow</span>
+          <n-space align="center" :size="6">
+            <n-tag :type="workflowTagType" size="small">{{ workflowStatusText }}</n-tag>
+            <n-button v-if="implStatus.workflow_url" text tag="a" :href="implStatus.workflow_url" target="_blank" size="small" style="opacity: 0.7">
+              查看 →
+            </n-button>
+          </n-space>
+        </div>
+
+        <!-- 变更文件 -->
+        <div v-if="implStatus.pr_files_changed" class="info-item">
+          <span class="info-label">变更</span>
+          <span style="font-size: 13px">{{ implStatus.pr_files_changed }} 个文件</span>
+        </div>
+      </div>
+
+      <!-- Agent 未分配警告 (紧凑内联) -->
+      <n-alert
+        v-if="showAgentWarning"
+        type="warning"
+        :bordered="false"
+        style="margin-top: 16px"
+      >
+        <template #header>Copilot Agent 未成功分配</template>
+        <div style="font-size: 12px">
+          可能原因: Copilot 未启用 · Token 权限不足 · Ruleset 阻止
+          <n-space :size="8" style="margin-top: 8px">
+            <n-button
+              size="tiny" type="primary" tag="a"
+              :href="implStatus.issue_url || `https://github.com/${repoName}/issues/${implStatus.github_issue_number}`"
+              target="_blank"
+            >
+              手动分配 →
+            </n-button>
+            <n-button size="tiny" @click="refreshStatus" quaternary>重新检查</n-button>
+          </n-space>
+        </div>
+      </n-alert>
+
+      <!-- Session 提示 (简化版, 仅在编码中时显示) -->
+      <div
+        v-if="implStatus.status === 'agent_working'"
+        style="margin-top: 16px; padding: 12px; background: rgba(99,226,184,0.06); border-radius: 8px; font-size: 12px; color: rgba(255,255,255,0.65)"
+      >
+        💡 Copilot Agent 正在编码中。可以在
         <n-button text tag="a" href="https://github.com/copilot/agents" target="_blank" size="small" type="info">
           GitHub Agents 页面
         </n-button>
-        查看 Copilot 的内部思考过程、使用的工具和实时日志。
-        PR 创建后也可以在 PR 页面查看 Session Log。
-      </n-alert>
+        查看实时思考过程和日志。PR 创建后也可在 PR 页面查看 Session Log。
+      </div>
     </n-card>
 
-    <!-- Agent 完成提示 -->
-    <n-card v-if="isAgentDone" style="background: #16213e; margin-bottom: 16px">
-      <n-result status="success" title="Copilot Agent 编码完成" :description="agentDoneDesc">
-        <template #footer>
-          <n-space>
-            <n-button type="primary" @click="goToReview">
-              🔍 进入审查
-            </n-button>
-            <n-button v-if="implStatus?.github_pr_number" @click="loadDiff" :loading="loadingDiff" quaternary>
-              📝 查看 Diff
-            </n-button>
-            <n-button
-              v-if="implStatus?.pr_url"
-              text
-              tag="a"
-              :href="implStatus.pr_url"
-              target="_blank"
-              type="info"
-            >
-              在 GitHub 上查看 PR →
-            </n-button>
-          </n-space>
-        </template>
-      </n-result>
+    <!-- ═══════════ 区域 3: 编码完成 → 操作 ═══════════ -->
+    <n-card
+      v-if="isAgentDone"
+      style="background: linear-gradient(135deg, #16213e 0%, #1a3a2a 100%); margin-bottom: 16px; border: 1px solid rgba(99,226,184,0.2)"
+      :content-style="{ padding: '24px' }"
+    >
+      <div style="text-align: center; margin-bottom: 16px">
+        <div style="font-size: 40px; margin-bottom: 8px">✅</div>
+        <div style="font-size: 18px; font-weight: 600; color: #63e2b8">Copilot Agent 编码完成</div>
+        <n-text depth="3" style="font-size: 13px">{{ agentDoneDesc }}</n-text>
+      </div>
+      <n-space justify="center" :size="12">
+        <n-button type="primary" @click="goToReview" size="small">
+          🔍 进入审查
+        </n-button>
+        <n-button v-if="implStatus?.github_pr_number" @click="loadDiff" :loading="loadingDiff" size="small" quaternary>
+          📝 查看 Diff
+        </n-button>
+        <n-button
+          v-if="implStatus?.pr_url"
+          text tag="a" size="small" type="info"
+          :href="implStatus.pr_url"
+          target="_blank"
+        >
+          在 GitHub 上查看 PR →
+        </n-button>
+      </n-space>
     </n-card>
 
-    <!-- PR Diff 查看 (可折叠) -->
-    <n-card v-if="diffData" title="📝 PR Diff" style="background: #16213e; margin-bottom: 16px">
+    <!-- PR 已合并 -->
+    <n-card
+      v-if="implStatus?.status === 'pr_merged'"
+      style="background: linear-gradient(135deg, #16213e 0%, #1a3a2a 100%); margin-bottom: 16px; border: 1px solid rgba(99,226,184,0.2)"
+      :content-style="{ padding: '20px', textAlign: 'center' }"
+    >
+      <div style="font-size: 36px; margin-bottom: 6px">🎉</div>
+      <div style="font-size: 16px; font-weight: 600; color: #63e2b8">PR 已合并</div>
+    </n-card>
+
+    <!-- ═══════════ PR Diff 查看 (可折叠) ═══════════ -->
+    <n-card v-if="diffData" style="background: #16213e; margin-bottom: 16px" :content-style="{ padding: '12px 16px' }">
+      <template #header>
+        <span style="font-size: 14px">📝 PR Diff</span>
+      </template>
       <n-collapse>
         <n-collapse-item
           v-for="f in diffData.files"
@@ -255,11 +269,6 @@
         </n-collapse-item>
       </n-collapse>
     </n-card>
-
-    <!-- PR 已合并 (遗留兼容) -->
-    <n-space v-if="implStatus?.status === 'pr_merged'" style="margin-top: 16px">
-      <n-tag type="success" size="large">✅ PR 已合并</n-tag>
-    </n-space>
   </div>
 </template>
 
@@ -350,6 +359,12 @@ const agentEverWorked = computed(() => {
     branch.startsWith('copilot/') ||
     ['agent_working', 'agent_done', 'pr_created', 'pr_merged'].includes(s)
   )
+})
+
+const showAgentWarning = computed(() => {
+  if (!implStatus.value?.github_issue_number) return false
+  if (implStatus.value.copilot_assigned || agentEverWorked.value) return false
+  return implStatus.value.status === 'task_created'
 })
 
 const isImplementing = computed(() =>
@@ -541,3 +556,37 @@ onUnmounted(() => {
   stopPolling()
 })
 </script>
+
+<style scoped>
+.impl-panel :deep(.n-card) {
+  border-radius: 10px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px 20px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.info-label {
+  flex-shrink: 0;
+  width: 60px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.4);
+}
+
+@media (max-width: 768px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

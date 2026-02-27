@@ -11,6 +11,7 @@ echo ============================================================
 echo   AI-Studio Frontend (Vite) — 开发模式
 echo ============================================================
 echo   地址: http://localhost:5174/studio/
+echo   局域网: http://0.0.0.0:5174/studio/
 echo   代理: /studio-api -^> http://localhost:8002
 echo ============================================================
 echo.
@@ -22,4 +23,4 @@ if not exist "%PROJECT_ROOT%frontend\node_modules" (
 )
 
 cd /d "%PROJECT_ROOT%frontend"
-npm run dev
+npm run dev -- --host 0.0.0.0

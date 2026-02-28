@@ -1,7 +1,7 @@
 <template>
   <n-space vertical :size="16">
     <!-- 工作目录管理 -->
-    <n-card title="📁 工作目录管理" size="small" style="background: #16213e">
+    <n-card title="📁 工作目录管理" size="small" style="background: #212121">
       <template #header-extra>
         <n-space :size="8">
           <n-button size="small" type="primary" @click="showAddDir = true">
@@ -339,7 +339,7 @@
     </n-card>
 
     <!-- 工作区概览 -->
-    <n-card title="🔍 工作区概览" size="small" style="background: #16213e">
+    <n-card title="🔍 工作区概览" size="small" style="background: #212121">
       <template #header-extra>
         <n-button size="small" @click="fetchWorkspaceOverview(true)" :loading="loadingWorkspace">
           🔄 刷新
@@ -449,7 +449,7 @@
     </n-card>
 
     <!-- 系统状态 -->
-    <n-card title="🖥️ 系统状态" size="small" style="background: #16213e">
+    <n-card title="🖥️ 系统状态" size="small" style="background: #212121">
       <n-spin :show="loadingStatus">
         <n-descriptions :column="1" label-placement="left" bordered v-if="systemStatus">
           <n-descriptions-item :label="vcsLabel + ' 分支'">
@@ -471,7 +471,7 @@
     </n-card>
 
     <!-- 容器状态 -->
-    <n-card title="🐳 Docker 容器" size="small" style="background: #16213e" v-if="systemStatus?.containers">
+    <n-card title="🐳 Docker 容器" size="small" style="background: #212121" v-if="systemStatus?.containers">
       <n-table :bordered="false" size="small">
         <thead><tr><th>容器名</th><th>状态</th><th>端口</th></tr></thead>
         <tbody>
@@ -485,7 +485,7 @@
     </n-card>
 
     <!-- 外部 API 端点检测 -->
-    <n-card title="🔌 外部 API 端点检测" size="small" style="background: #16213e">
+    <n-card title="🔌 外部 API 端点检测" size="small" style="background: #212121">
       <template #header-extra>
         <n-space :size="8">
           <n-text v-if="probeResult?.context" depth="3" style="font-size: 11px; max-width: 560px">
@@ -712,8 +712,9 @@ async function handleSaveTokenByProvider(dir: any) {
       await workspaceDirApi.update(dir.id, { gitlab_token: token })
       message.success('GitLab Token 已保存')
     } else {
-      await workspaceDirApi.update(dir.id, { github_token: token })
-      message.success('GitHub Token 已保存')
+      // GitHub Token 统一通过系统级配置服务保存
+      await systemApi.setGithubToken(token)
+      message.success('GitHub Token 已保存（系统级）')
     }
     dir._tokenInput = ''
     dir._showTokenInput = false
@@ -732,8 +733,9 @@ async function handleClearTokenByProvider(dir: any) {
       await workspaceDirApi.update(dir.id, { gitlab_token: '' })
       message.success('GitLab Token 已清除')
     } else {
-      await workspaceDirApi.update(dir.id, { github_token: '' })
-      message.success('GitHub Token 已清除')
+      // GitHub Token 统一通过系统级配置服务清空
+      await systemApi.clearGithubToken()
+      message.success('GitHub Token 已清除（系统级）')
     }
     await fetchWorkspaceDirs()
   } catch (e: any) {

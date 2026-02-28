@@ -2,7 +2,7 @@
   <n-space vertical :size="16">
 
     <!-- 安全设置 -->
-    <n-card size="small" style="background: #16213e">
+    <n-card size="small" style="background: #212121">
       <n-space align="center" justify="space-between">
         <n-space align="center" :size="8">
           <n-text>🛡️ 命令伪造检测</n-text>
@@ -479,7 +479,7 @@ watch(activeSection, (val) => {
   gap: 8px;
 }
 .rule-card {
-  background: #16213e;
+  background: #212121;
   border-radius: 8px;
   padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -489,7 +489,7 @@ watch(activeSection, (val) => {
   border-color: rgba(255, 255, 255, 0.12);
 }
 .rule-deny {
-  border-left: 3px solid #e94560;
+  border-left: 3px solid #7c6cff;
 }
 .rule-disabled {
   opacity: 0.5;
@@ -522,7 +522,7 @@ watch(activeSection, (val) => {
   gap: 6px;
 }
 .audit-item {
-  background: #16213e;
+  background: #212121;
   border-radius: 6px;
   padding: 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.04);

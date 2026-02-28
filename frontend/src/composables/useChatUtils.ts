@@ -158,7 +158,7 @@ const userColors = ['#0ea5e9', '#a855f7', '#22c55e', '#f59e0b', '#ec4899', '#06b
 let colorIndex = 0
 
 export function getUserColor(senderName: string): string {
-  if (!senderName || senderName === 'assistant') return '#e94560'
+  if (!senderName || senderName === 'assistant') return '#7c6cff'
   if (!userColorMap[senderName]) {
     userColorMap[senderName] = userColors[colorIndex % userColors.length]
     colorIndex++

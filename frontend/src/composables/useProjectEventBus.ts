@@ -15,8 +15,13 @@ export interface StreamTaskState {
   content: string
   thinking: string
   toolCalls: Array<{id: string; name: string; arguments: any; status: string; result?: string; duration_ms?: number}>
-  segments: Array<{type: 'content' | 'tool'; text?: string; toolCall?: any}>
+  segments: Array<{type: 'content' | 'tool' | 'plan' | 'reflection' | 'agent_switch'; text?: string; toolCall?: any; plan?: any; agent?: string}>
   tokenUsage: any
+  // Agent 扩展字段
+  plan?: { steps: Array<{title: string; status: string; detail?: string}>; current_step?: number }
+  reflections: string[]
+  currentAgent?: string
+  costCents?: number
 }
 
 interface EventBusOptions {
@@ -171,6 +176,7 @@ export function useProjectEventBus(options: EventBusOptions) {
           toolCalls: [],
           segments: [],
           tokenUsage: null,
+          reflections: [],
         })
         options.scrollToBottom()
       }
@@ -190,6 +196,7 @@ export function useProjectEventBus(options: EventBusOptions) {
         toolCalls: [],
         segments: [],
         tokenUsage: null,
+        reflections: [],
       }
       streamingTasks.value.set(taskId, state)
     }
@@ -240,6 +247,24 @@ export function useProjectEventBus(options: EventBusOptions) {
     } else if (type === 'usage') {
       state.tokenUsage = event.usage
       options.lastTokenUsage.value = event.usage
+      if (event.usage?.cost_cents) {
+        state.costCents = (state.costCents || 0) + event.usage.cost_cents
+      }
+    } else if (type === 'plan_update') {
+      // Agent 计划更新
+      state.plan = event.plan || event.data
+      state.segments.push({ type: 'plan', plan: state.plan })
+    } else if (type === 'reflection') {
+      // Agent 反思
+      const text = event.content || event.reflection || ''
+      if (text) {
+        state.reflections.push(text)
+        state.segments.push({ type: 'reflection', text })
+      }
+    } else if (type === 'agent_switch') {
+      // Agent 切换
+      state.currentAgent = event.agent_name || event.agent || ''
+      state.segments.push({ type: 'agent_switch', agent: state.currentAgent })
     } else if (type === 'truncated') {
       if (myTaskIds.value.has(taskId) && autoContinueCount < studioConfig.maxAutoContinues) {
         autoContinueCount++

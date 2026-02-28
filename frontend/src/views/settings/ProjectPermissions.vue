@@ -221,7 +221,7 @@ function togglePerm(proj: Project, key: string, enabled: boolean) {
 // ---- danger rail style ----
 function dangerRailStyle({ focused, checked }: { focused: boolean; checked: boolean }) {
   if (checked) {
-    return { background: '#e94560', boxShadow: focused ? '0 0 0 2px #e9456040' : undefined }
+    return { background: '#7c6cff', boxShadow: focused ? '0 0 0 2px #7c6cff40' : undefined }
   }
   return {}
 }
@@ -283,7 +283,7 @@ async function handleBatchAction(key: string) {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   overflow: hidden;
-  background: #16213e;
+  background: #212121;
 }
 
 .perm-grid-header {

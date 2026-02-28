@@ -28,7 +28,7 @@
     </n-space>
 
     <n-spin :show="store.loading">
-      <n-list v-if="filteredProjects.length" bordered style="background: #16213e">
+      <n-list v-if="filteredProjects.length" bordered style="background: #212121">
         <n-list-item
           v-for="p in filteredProjects"
           :key="p.id"

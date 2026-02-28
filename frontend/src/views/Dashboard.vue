@@ -2,11 +2,11 @@
   <div>
     <n-space vertical :size="24">
       <!-- 欢迎区 -->
-      <n-card style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)">
+      <n-card style="background: linear-gradient(135deg, #1a1a1a 0%, #212121 100%)">
         <div class="welcome-area">
           <div>
-            <n-h2 :style="{ margin: 0, color: '#e94560', fontSize: isMobile ? '18px' : undefined }">🤖 AI设计院</n-h2>
-            <n-text depth="3" :style="{ fontSize: isMobile ? '12px' : undefined }">AI 驱动的需求迭代平台 — 让想法变成现实</n-text>
+            <n-h2 :style="{ margin: 0, color: '#7c6cff', fontSize: isMobile ? '18px' : undefined }">🐕 Dogi</n-h2>
+            <n-text depth="3" :style="{ fontSize: isMobile ? '12px' : undefined }">你的 AI 伙伴，无所不能</n-text>
           </div>
           <n-button type="primary" @click="showCreate = true" :size="isMobile ? 'medium' : 'large'">
             <template #icon><n-icon :component="AddOutline" /></template>
@@ -16,7 +16,7 @@
       </n-card>
 
       <!-- 当前工作目录概览 (只读信息，切换请用顶栏) -->
-      <n-card size="small" style="background: #16213e; padding: 0">
+      <n-card size="small" style="background: #212121; padding: 0">
         <div class="ws-bar">
           <div class="ws-bar-left">
             <span style="font-size: 14px; margin-right: 4px">📁</span>
@@ -53,22 +53,22 @@
       <!-- 统计卡片 -->
       <n-grid :cols="isMobile ? 2 : 4" :x-gap="isMobile ? 8 : 16" :y-gap="isMobile ? 8 : 16">
         <n-gi>
-          <n-card size="small" style="background: #16213e">
+          <n-card size="small" style="background: #212121">
             <n-statistic label="进行中" :value="activeCount" />
           </n-card>
         </n-gi>
         <n-gi>
-          <n-card size="small" style="background: #16213e">
+          <n-card size="small" style="background: #212121">
             <n-statistic label="已部署" :value="deployedCount" />
           </n-card>
         </n-gi>
         <n-gi>
-          <n-card size="small" style="background: #16213e">
+          <n-card size="small" style="background: #212121">
             <n-statistic label="快照数" :value="snapshotCount" />
           </n-card>
         </n-gi>
         <n-gi>
-          <n-card size="small" style="background: #16213e">
+          <n-card size="small" style="background: #212121">
             <n-statistic label="总项目" :value="wsProjectCount" />
           </n-card>
         </n-gi>
@@ -76,7 +76,7 @@
 
       <!-- 最近动态：标签分组筛选 -->
       <div v-if="projects.length">
-        <n-card size="small" style="background: #16213e">
+        <n-card size="small" style="background: #212121">
           <template #header>
             <div class="filter-section">
               <!-- 类型筛选 -->
@@ -815,7 +815,7 @@ onUnmounted(() => {
 
 .filter-chip.active .chip-count {
   background: var(--chip-color, #63e2b7);
-  color: #16213e;
+  color: #212121;
   font-weight: 700;
 }
 
@@ -844,7 +844,7 @@ onUnmounted(() => {
 
 .filter-chip-user.active .chip-avatar {
   background: var(--chip-color, #63e2b7);
-  color: #16213e;
+  color: #212121;
 }
 
 /* ── 工作目录概览栏 ──────────────── */

@@ -530,7 +530,7 @@ watch(() => route.params.id, async () => {
   gap: 12px;
   padding: 6px 12px;
   margin-bottom: 6px;
-  background: #16213e;
+  background: #212121;
   border-radius: 8px;
   flex-wrap: nowrap;
   min-height: 36px;

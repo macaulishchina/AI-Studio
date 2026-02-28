@@ -74,6 +74,23 @@ if errorlevel 1 (
 )
 goto :eof
 
+:check_device_deps
+echo [Deps] 检查设备调试依赖...
+pip show sounddevice >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] sounddevice 未安装, 服务端音频采集不可用
+    echo        安装: pip install sounddevice numpy
+)
+pip show opencv-python-headless >nul 2>&1
+if errorlevel 1 (
+    pip show opencv-python >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] opencv 未安装, 服务端摄像头不可用
+        echo        安装: pip install opencv-python-headless
+    )
+)
+goto :eof
+
 :ensure_frontend_deps
 echo [Deps] 检查前端依赖...
 if not exist "%PROJECT_ROOT%frontend\node_modules" (
@@ -93,6 +110,7 @@ goto :eof
 
 :run_backend
 call :ensure_backend_deps
+call :check_device_deps
 cd /d "%PROJECT_ROOT%"
 python -m uvicorn studio.backend.main:app --host %DEPLOY_BACKEND_HOST% --port %DEPLOY_BACKEND_PORT%
 goto :eof
@@ -107,6 +125,7 @@ goto :eof
 :run_all
 call :ensure_backend_deps
 call :ensure_frontend_deps
+call :check_device_deps
 call :build_frontend
 
 echo [INFO] 启动后端窗口...

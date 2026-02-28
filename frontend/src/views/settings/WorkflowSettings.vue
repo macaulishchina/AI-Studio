@@ -8,7 +8,7 @@
     <n-spin :show="store.loading">
       <n-grid :cols="isMobile ? 1 : 2" :x-gap="12" :y-gap="12" v-if="store.modules.length">
         <n-gi v-for="mod in store.modules" :key="mod.id">
-          <n-card size="small" style="background: #1a1a2e" hoverable>
+          <n-card size="small" style="background: #1a1a1a" hoverable>
             <n-space align="center" :size="10">
               <span style="font-size: 22px">{{ mod.icon }}</span>
               <div style="flex: 1; min-width: 0">
@@ -72,7 +72,7 @@
     <n-spin :show="store.loading">
       <n-grid :cols="1" :y-gap="12" v-if="store.workflows.length">
         <n-gi v-for="wf in store.workflows" :key="wf.id">
-          <n-card size="small" style="background: #1a1a2e" hoverable>
+          <n-card size="small" style="background: #1a1a1a" hoverable>
             <!-- 工作流头部: 名称 + 操作 -->
             <n-space justify="space-between" align="center">
               <n-space align="center" :size="10">

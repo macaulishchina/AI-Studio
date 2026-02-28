@@ -111,11 +111,79 @@ check_backend_deps() {
   fi
 }
 
+check_device_permissions() {
+  # 检查音频/视频设备权限 (可选, 仅影响设备调试功能)
+  local missing_groups=""
+  if [ -e /dev/snd ] && ! id -nG | grep -qw audio; then
+    missing_groups="audio"
+  fi
+  if [ -e /dev/video0 ] && ! id -nG | grep -qw video; then
+    missing_groups="${missing_groups:+$missing_groups }video"
+  fi
+  if [ -n "$missing_groups" ]; then
+    echo -e "${YELLOW}[WARN]${NC} 当前用户不在 ${missing_groups} 组, 设备调试功能可能受限"
+    echo -e "       运行: ${GREEN}sudo usermod -aG ${missing_groups// /,} \$(whoami)${NC} 后重新登录"
+  fi
+
+  # 检查可选系统库 (优先使用 dpkg-query 判断是否已安装)
+  has_portaudio=false
+  if command -v dpkg-query >/dev/null 2>&1; then
+    if dpkg-query -W -f='${Status}' libportaudio2 2>/dev/null | grep -q "install ok installed"; then
+      has_portaudio=true
+    fi
+  fi
+  if [ "$has_portaudio" = false ]; then
+    if ldconfig -p 2>/dev/null | grep -q "libportaudio"; then
+      has_portaudio=true
+    fi
+  fi
+  if [ "$has_portaudio" = false ]; then
+    echo -e "${YELLOW}[WARN]${NC} 未检测到 libportaudio2, 服务端音频采集不可用"
+    echo -e "       安装: ${GREEN}sudo apt install libportaudio2 libasound2-dev${NC}"
+  fi
+}
+
 check_frontend_deps() {
   echo -e "${BLUE}[Deps]${NC} 检查前端依赖..."
   if [ ! -d "$PROJECT_ROOT/frontend/node_modules" ]; then
     echo -e "${YELLOW}[INFO]${NC} 安装前端依赖..."
     (cd "$PROJECT_ROOT/frontend" && npm install)
+  fi
+}
+
+# 启动后端前清理占用端口的旧进程
+kill_port() {
+  local port="$1"
+  local pids pid pgid
+  if ! command -v lsof >/dev/null 2>&1; then
+    pids=$(ss -ltnp 2>/dev/null | awk -v P=":$port" '$4 ~ P { match($0,/pid=[0-9]+/); if (RSTART) { pid=substr($0,RSTART+4,RLENGTH-4); print pid }}' || true)
+  else
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+  fi
+
+  if [ -n "$pids" ]; then
+    echo -e "${YELLOW}[INFO]${NC} 端口 $port 被占用, 正在清理旧进程..."
+    for pid in $pids; do
+      pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
+      if [ -n "$pgid" ]; then
+        [ -n "${SHOW_KILL_DETAILS:-}" ] && echo -e "  -> 发送 TERM 到进程组 -$pgid"
+        kill -TERM -"$pgid" 2>/dev/null || true
+        sleep 2
+        if ps -p "$pid" >/dev/null 2>&1; then
+          [ -n "${SHOW_KILL_DETAILS:-}" ] && echo -e "  -> 进程仍然存在，发送 KILL 到进程组 -$pgid"
+          kill -KILL -"$pgid" 2>/dev/null || true
+        fi
+      else
+        [ -n "${SHOW_KILL_DETAILS:-}" ] && echo -e "  -> 发送 TERM 到 PID $pid"
+        kill -TERM "$pid" 2>/dev/null || true
+        sleep 1
+        if ps -p "$pid" >/dev/null 2>&1; then
+          [ -n "${SHOW_KILL_DETAILS:-}" ] && echo -e "  -> PID $pid 未退出，发送 KILL"
+          kill -KILL "$pid" 2>/dev/null || true
+        fi
+      fi
+    done
+    sleep 1
   fi
 }
 
@@ -126,9 +194,8 @@ build_frontend() {
 
 start_backend() {
   cd "$PROJECT_ROOT"
-  python3 -m uvicorn studio.backend.main:app \
-    --host "$DEPLOY_BACKEND_HOST" \
-    --port "$DEPLOY_BACKEND_PORT"
+  kill_port "$DEPLOY_BACKEND_PORT"
+  python3 -m uvicorn studio.backend.main:app --host "$DEPLOY_BACKEND_HOST" --port "$DEPLOY_BACKEND_PORT"
 }
 
 start_frontend() {
@@ -138,15 +205,20 @@ start_frontend() {
 
 start_all_foreground() {
   cleanup() {
+    # 防止重复打印（多次 SIGINT/SIGTERM 触发时）
+    if [ "${_DEPLOY_CLEANING:-0}" = "1" ]; then
+      return
+    fi
+    _DEPLOY_CLEANING=1
     echo ""
     echo -e "${YELLOW}⏹ 正在停止本地部署进程...${NC}"
-    kill "$BACKEND_PID" 2>/dev/null || true
-    kill "$FRONTEND_PID" 2>/dev/null || true
+    kill -- -$$ 2>/dev/null || true
     echo -e "${GREEN}✅ 已停止${NC}"
     exit 0
   }
   trap cleanup SIGINT SIGTERM
 
+  kill_port "$DEPLOY_BACKEND_PORT"
   (cd "$PROJECT_ROOT" && python3 -m uvicorn studio.backend.main:app --host "$DEPLOY_BACKEND_HOST" --port "$DEPLOY_BACKEND_PORT") &
   BACKEND_PID=$!
   sleep 2
@@ -176,6 +248,8 @@ start_with_tmux() {
     exit 1
   fi
 
+  # 清理端口并构造后端启动命令
+  kill_port "$DEPLOY_BACKEND_PORT"
   local backend_cmd="cd '$PROJECT_ROOT' && export PYTHONPATH='$PYTHONPATH' STUDIO_DATA_PATH='$STUDIO_DATA_PATH' WORKSPACE_PATH='$WORKSPACE_PATH' STUDIO_ADMIN_USER='$STUDIO_ADMIN_USER' STUDIO_ADMIN_PASS='$STUDIO_ADMIN_PASS' STUDIO_SECRET_KEY='$STUDIO_SECRET_KEY' DEPLOY_BACKEND_HOST='$DEPLOY_BACKEND_HOST' DEPLOY_BACKEND_PORT='$DEPLOY_BACKEND_PORT' && python3 -m uvicorn studio.backend.main:app --host '$DEPLOY_BACKEND_HOST' --port '$DEPLOY_BACKEND_PORT'"
   local frontend_cmd="cd '$PROJECT_ROOT/frontend' && npm run preview -- --host '$DEPLOY_FRONTEND_HOST' --port '$DEPLOY_FRONTEND_PORT'"
 
@@ -219,6 +293,7 @@ main() {
   case "$TARGET" in
     backend)
       check_backend_deps
+      check_device_permissions
       if [ "$USE_TMUX" -eq 1 ]; then
         start_with_tmux
       else
@@ -237,6 +312,7 @@ main() {
     all)
       check_backend_deps
       check_frontend_deps
+      check_device_permissions
       build_frontend
       if [ "$USE_TMUX" -eq 1 ]; then
         start_with_tmux

@@ -4,12 +4,12 @@
       <n-card class="login-card" :bordered="false">
         <template #header>
           <div style="text-align: center">
-            <div style="font-size: 48px; margin-bottom: 8px">🤖</div>
-            <n-text style="font-size: 22px; font-weight: 700; color: #e94560">
-              设计院 Studio
+            <div style="font-size: 48px; margin-bottom: 8px">🐕</div>
+            <n-text style="font-size: 22px; font-weight: 700; color: #7c6cff">
+              Dogi
             </n-text>
             <div style="margin-top: 4px">
-              <n-text depth="3" style="font-size: 13px">设计院 · AI 驱动迭代开发</n-text>
+              <n-text depth="3" style="font-size: 13px">你的 AI 伙伴，无所不能</n-text>
             </div>
           </div>
         </template>
@@ -309,7 +309,7 @@ async function handleRegister() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0a1628 0%, #16213e 50%, #1a1a2e 100%);
+  background: linear-gradient(135deg, #0a1628 0%, #212121 50%, #1a1a1a 100%);
 }
 
 .login-card-wrapper {

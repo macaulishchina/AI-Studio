@@ -117,7 +117,7 @@
         </n-descriptions>
 
         <!-- 角色选择 -->
-        <n-card size="small" style="background: #16213e">
+        <n-card size="small" style="background: #212121">
           <template #header>
             <n-text style="font-size: 13px">👤 角色</n-text>
           </template>
@@ -140,7 +140,7 @@
         </n-card>
 
         <!-- 细分权限 -->
-        <n-card size="small" style="background: #16213e">
+        <n-card size="small" style="background: #212121">
           <template #header>
             <n-space align="center" :size="8">
               <n-text style="font-size: 13px">🔑 细分权限</n-text>
@@ -167,7 +167,7 @@
         </n-card>
 
         <!-- 状态 (仅编辑模式) -->
-        <n-card v-if="modalMode === 'edit'" size="small" style="background: #16213e">
+        <n-card v-if="modalMode === 'edit'" size="small" style="background: #212121">
           <template #header>
             <n-text style="font-size: 13px">📊 状态</n-text>
           </template>
@@ -456,7 +456,7 @@ async function handleMoreAction(key: string, u: UserInfo) {
 }
 
 .user-card {
-  background: #16213e;
+  background: #212121;
   border-radius: 8px;
   padding: 12px 16px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -473,7 +473,7 @@ async function handleMoreAction(key: string, u: UserInfo) {
 
 .user-card-disabled {
   opacity: 0.6;
-  border-left: 3px solid #e94560;
+  border-left: 3px solid #7c6cff;
 }
 
 .user-card-header {

@@ -1,7 +1,7 @@
 <template>
   <n-space vertical :size="16">
     <!-- Copilot OAuth 认证 -->
-    <n-card title="🤖 Copilot API 授权" size="small" style="background: #16213e">
+    <n-card title="🤖 Copilot API 授权" size="small" style="background: #212121">
       <n-alert v-if="!copilotStatus.authenticated" type="info" style="margin-bottom: 12px">
         授权后可使用 Claude Sonnet 4、Gemini 2.5 Pro、Grok 3 等 Copilot 专属高级模型。
         需要 GitHub Copilot Pro/Pro+ 订阅。

@@ -207,7 +207,8 @@ export const systemApi = {
   workspaceOverview: (forceRefresh = false) =>
     api.get('/system/workspace-overview', { params: forceRefresh ? { force_refresh: true } : {} }),
   setGitProvider: (provider: 'github' | 'gitlab') => api.post('/system/git-provider', { provider }),
-  // GitHub Token / Repo 运行时管理
+  // GitHub Token 统一管理 (studio_config 持久化)
+  getGithubTokenStatus: () => api.get('/system/github-token'),
   setGithubToken: (token: string) => api.post('/system/github-token', { token }),
   clearGithubToken: () => api.delete('/system/github-token'),
   setGithubRepo: (repo: string) => api.post('/system/github-repo', { repo }),
@@ -344,6 +345,94 @@ export const mcpApi = {
   // 审计日志
   auditLog: (params?: any) => api.get('/mcp/audit-log', { params }),
   auditLogStats: () => api.get('/mcp/audit-log/stats'),
+
+}
+
+export const observabilityApi = {
+  // Traces
+  getTraces: (projectId?: string, limit?: number) =>
+    api.get('/observability/traces', { params: { project_id: projectId, limit } }),
+  getTraceStats: (projectId?: string) =>
+    api.get('/observability/traces/stats', { params: { project_id: projectId } }),
+  // Metrics
+  getMetrics: (projectId?: string) =>
+    api.get('/observability/metrics', { params: { project_id: projectId } }),
+  // Budget
+  getBudget: (projectId?: string, sessionId?: string) =>
+    api.get('/observability/budget', { params: { project_id: projectId, session_id: sessionId } }),
+  // RAG
+  getRagStatus: () => api.get('/observability/rag/status'),
+  triggerReindex: () => api.post('/observability/rag/reindex'),
+  // Memory
+  getMemoryItems: (projectId?: string, memoryType?: string, limit?: number) =>
+    api.get('/observability/memory', { params: { project_id: projectId, memory_type: memoryType, limit } }),
+  deleteMemoryItem: (memoryId: string) => api.delete(`/observability/memory/${memoryId}`),
+}
+
+// ==================== 对话 (Dogi Conversations) ====================
+export const conversationApi = {
+  list: (params?: any) => api.get('/conversations', { params }),
+  get: (id: number) => api.get(`/conversations/${id}`),
+  create: (data: any) => api.post('/conversations', data),
+  update: (id: number, data: any) => api.patch(`/conversations/${id}`, data),
+  delete: (id: number) => api.delete(`/conversations/${id}`),
+  getMessages: (convId: number) => api.get(`/conversations/${convId}/messages`),
+  discuss: (convId: number, data: any) => api.post(`/conversations/${convId}/discuss`, data),
+  discussUrl: (convId: number) => `/studio-api/conversations/${convId}/discuss`,
+  clearContext: (convId: number) => api.delete(`/conversations/${convId}/clear-context`),
+  summarizeContext: (convId: number) => api.post(`/conversations/${convId}/summarize-context`, null, { timeout: 60000 }),
+}
+
+// ==================== 服务端语音 (Voice Hardware) ====================
+export const voiceApi = {
+  /** 服务端音频输入设备列表 */
+  getDevices: () => api.get('/voice/devices'),
+  /** 服务端音频驱动 & 系统信息 */
+  getDriverInfo: () => api.get('/voice/driver-info'),
+  /** 短时录音测试 */
+  testCapture: (params?: { device?: number; duration?: number; samplerate?: number; channels?: number }) =>
+    api.post('/voice/test-capture', null, { params }),
+  /** 录音并返回 WAV 音频文件 */
+  recordAudio: (params?: { device?: number; duration?: number; samplerate?: number; channels?: number }, timeout?: number) =>
+    api.post('/voice/record-audio', null, { params, responseType: 'blob', timeout: timeout || 60000 }),
+  /** 实时音量 SSE 流 URL (直接给 EventSource 使用) */
+  levelStreamUrl: (params?: { device?: number; samplerate?: number; interval_ms?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.device != null) qs.set('device', String(params.device))
+    if (params?.samplerate) qs.set('samplerate', String(params.samplerate))
+    if (params?.interval_ms) qs.set('interval_ms', String(params.interval_ms))
+    const query = qs.toString()
+    return `/studio-api/voice/level-stream${query ? '?' + query : ''}`
+  },
+}
+
+// ==================== 服务端摄像头 (Camera) ====================
+export const cameraApi = {
+  /** 摄像头设备列表 */
+  getDevices: () => api.get('/camera/devices'),
+  /** 摄像头详细信息 */
+  getInfo: (device?: number) => api.get('/camera/info', { params: device != null ? { device } : undefined }),
+  /** 单帧快照 URL */
+  snapshotUrl: (params?: { device?: number; width?: number; height?: number; quality?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.device != null) qs.set('device', String(params.device))
+    if (params?.width) qs.set('width', String(params.width))
+    if (params?.height) qs.set('height', String(params.height))
+    if (params?.quality) qs.set('quality', String(params.quality))
+    const query = qs.toString()
+    return `/studio-api/camera/snapshot${query ? '?' + query : ''}`
+  },
+  /** MJPEG 实时流 URL (直接用于 <img src="...">) */
+  streamUrl: (params?: { device?: number; fps?: number; width?: number; height?: number; quality?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.device != null) qs.set('device', String(params.device))
+    if (params?.fps) qs.set('fps', String(params.fps))
+    if (params?.width) qs.set('width', String(params.width))
+    if (params?.height) qs.set('height', String(params.height))
+    if (params?.quality) qs.set('quality', String(params.quality))
+    const query = qs.toString()
+    return `/studio-api/camera/stream${query ? '?' + query : ''}`
+  },
 }
 
 export default api

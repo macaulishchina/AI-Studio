@@ -109,7 +109,7 @@
               size="small"
               :style="{
                 background: (msg.role === 'user' && isMyMessage(msg)) ? '#1a3a5c' : '#1a2a3e',
-                borderLeft: (msg.role === 'assistant' || (msg.role === 'user' && !isMyMessage(msg))) ? '2px solid ' + (msg.role === 'assistant' ? '#e94560' : '#f0a020') : 'none',
+                borderLeft: (msg.role === 'assistant' || (msg.role === 'user' && !isMyMessage(msg))) ? '2px solid ' + (msg.role === 'assistant' ? '#7c6cff' : '#f0a020') : 'none',
                 borderRight: (msg.role === 'user' && isMyMessage(msg)) ? '2px solid #0ea5e9' : 'none',
                 '--n-padding-top': '6px',
                 '--n-padding-bottom': '6px',
@@ -120,7 +120,7 @@
             <template #header>
               <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px">
                 <n-space align="center" :size="6" style="flex: 1; min-width: 0">
-                  <n-text :style="{ color: msg.role === 'assistant' ? '#e94560' : getUserColor(msg.sender_name), fontSize: '12px' }">
+                  <n-text :style="{ color: msg.role === 'assistant' ? '#7c6cff' : getUserColor(msg.sender_name), fontSize: '12px' }">
                     {{ msg.sender_name || msg.role }}
                   </n-text>
                   <n-tag v-if="msg.model_used" size="tiny" :bordered="false" round>
@@ -301,10 +301,10 @@
 
       <!-- AI 正在回复 (多任务 + 敲定方案统一渲染) -->
       <div v-for="card in activeStreamCards" :key="card.key" style="display: flex; justify-content: flex-start; margin-bottom: 6px">
-        <n-card size="small" style="max-width: 85%; background: #1a2a3e; border-left: 2px solid #e94560; --n-padding-top: 6px; --n-padding-bottom: 6px">
+        <n-card size="small" style="max-width: 85%; background: #1a2a3e; border-left: 2px solid #7c6cff; --n-padding-top: 6px; --n-padding-bottom: 6px">
           <template #header>
             <n-space align="center" :size="6">
-              <n-text style="color: #e94560; font-size: 12px">{{ displayModelName(card.model) }}</n-text>
+              <n-text style="color: #7c6cff; font-size: 12px">{{ displayModelName(card.model) }}</n-text>
               <n-tag size="tiny" :bordered="false" round :type="resolveProviderBadge(card.model).type">
                 {{ resolveProviderBadge(card.model).label }}
               </n-tag>
@@ -435,7 +435,7 @@
     </div>
 
     <!-- 图片预览区 -->
-    <div v-if="pendingImages.length" style="padding: 6px 8px; background: #16213e; border-radius: 6px; margin-bottom: 4px">
+    <div v-if="pendingImages.length" style="padding: 6px 8px; background: #212121; border-radius: 6px; margin-bottom: 4px">
       <n-space :size="6">
         <div v-for="(img, i) in pendingImages" :key="i" style="position: relative">
           <n-image :src="img.preview" width="64" height="64" style="border-radius: 6px; object-fit: cover" />
@@ -555,7 +555,7 @@
                 :show-indicator="false"
                 :height="3"
                 style="width: 48px"
-                :color="displayContextInfo.percentage > 80 ? '#e94560' : displayContextInfo.percentage > 50 ? '#f0a020' : '#18a058'"
+                :color="displayContextInfo.percentage > 80 ? '#7c6cff' : displayContextInfo.percentage > 50 ? '#f0a020' : '#18a058'"
               />
               <span class="action-bar-stat">
                 {{ formatTokens(displayContextInfo.used) }}/{{ formatTokens(displayContextInfo.total) }} · {{ displayContextInfo.percentage }}%
@@ -1431,10 +1431,10 @@ onUnmounted(() => {
   padding: 0;
 }
 .markdown-body p { margin: 0.4em 0; }
-.markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #e94560; margin: 0.6em 0 0.3em; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #7c6cff; margin: 0.6em 0 0.3em; }
 .markdown-body ul, .markdown-body ol { padding-left: 1.5em; }
 .markdown-body blockquote {
-  border-left: 3px solid #e94560;
+  border-left: 3px solid #7c6cff;
   margin: 0.4em 0;
   padding: 0.3em 0.8em;
   background: rgba(233, 69, 96, 0.1);
@@ -1918,7 +1918,7 @@ onUnmounted(() => {
   color: #777;
 }
 .ctx-role-user { color: #0ea5e9; }
-.ctx-role-assistant { color: #e94560; }
+.ctx-role-assistant { color: #7c6cff; }
 .ctx-role-system { color: #63e2b7; }
 
 .ctx-dot {
@@ -1973,7 +1973,7 @@ onUnmounted(() => {
 
 /* ============ 输入区布局 ============ */
 .input-area {
-  background: #16213e;
+  background: #212121;
   border-radius: 8px;
   padding: 5px 8px;
   flex-shrink: 0;

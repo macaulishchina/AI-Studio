@@ -15,12 +15,19 @@ const router = createRouter({
       children: [
         {
           path: '',
-          name: 'Dashboard',
-          component: () => import('@/views/Dashboard.vue'),
+          name: 'ChatHome',
+          component: () => import('@/views/ChatHome.vue'),
+        },
+        {
+          path: 'c/:id',
+          name: 'ChatView',
+          component: () => import('@/views/ChatHome.vue'),
+          props: true,
         },
         {
           path: 'projects',
-          redirect: '/',
+          name: 'ProjectList',
+          component: () => import('@/views/Dashboard.vue'),
         },
         {
           path: 'projects/:id',
@@ -38,6 +45,11 @@ const router = createRouter({
           name: 'Settings',
           component: () => import('@/views/Settings.vue'),
           props: true,
+        },
+        {
+          path: 'device-debug',
+          name: 'DeviceDebug',
+          component: () => import('@/views/VoiceTest.vue'),
         },
       ],
     },

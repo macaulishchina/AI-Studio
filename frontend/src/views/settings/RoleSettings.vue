@@ -13,7 +13,7 @@
     <n-spin :show="store.loading">
       <n-grid :cols="1" :y-gap="12" v-if="store.roles.length">
         <n-gi v-for="role in store.roles" :key="role.id">
-          <n-card size="small" style="background: #1a1a2e" hoverable>
+          <n-card size="small" style="background: #1a1a1a" hoverable>
             <n-space justify="space-between" align="center">
               <n-space align="center" :size="12">
                 <span style="font-size: 24px">{{ role.icon }}</span>
@@ -419,7 +419,7 @@ onMounted(() => {
 
 <style scoped>
 .prompt-preview {
-  background: #1a1a2e;
+  background: #1a1a1a;
   border-radius: 6px;
   padding: 12px 16px;
   max-height: 60vh;

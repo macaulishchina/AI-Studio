@@ -1,6 +1,6 @@
 """
-设计院 (Studio) - FastAPI 主入口
-独立的后端服务，管理需求讨论、代码实施、部署流水线
+Dogi (多吉) - FastAPI 主入口
+AI 驱动的通用对话与项目协作平台
 """
 import logging
 import os
@@ -31,6 +31,10 @@ from studio.backend.api.users import router as users_router
 from studio.backend.api.command_auth import router as command_auth_router
 from studio.backend.api.workspace_dirs import router as workspace_dirs_router
 from studio.backend.api.mcp import router as mcp_router, seed_mcp_servers
+from studio.backend.api.conversations import router as conversations_router
+from studio.backend.api.observability import router as observability_router
+from studio.backend.api.voice import router as voice_router
+from studio.backend.api.camera import router as camera_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,7 +46,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用启动/关闭生命周期"""
-    logger.info("🤖 设计院启动中...")
+    logger.info("🐕 Dogi 启动中...")
     await init_db()
     logger.info("✅ 数据库初始化完成")
 
@@ -98,13 +102,28 @@ async def lifespan(app: FastAPI):
     from studio.backend.services.mcp.registry import MCPServerRegistry
     await MCPServerRegistry.get_instance().load_from_db()
 
+    # 加载 DB 持久化的系统配置到 settings
+    await _load_studio_config()
+
     yield
+
+    # ── 关闭所有活跃的硬件 SSE 流 (防止 shutdown 阻塞热更新) ──
+    try:
+        from studio.backend.api.voice import shutdown_all_streams as voice_shutdown
+        voice_shutdown()
+    except Exception:
+        pass
+    try:
+        from studio.backend.api.camera import shutdown_all_streams as camera_shutdown
+        camera_shutdown()
+    except Exception:
+        pass
 
     # 关闭 MCP 连接
     from studio.backend.services.mcp.client_manager import MCPClientManager
     await MCPClientManager.get_instance().disconnect_all()
 
-    logger.info("🤖 设计院关闭")
+    logger.info("🐕 Dogi 关闭")
 
 
 async def _auto_migrate():
@@ -370,6 +389,54 @@ async def _auto_migrate():
             """))
             logger.info("✅ mcp_audit_log 表就绪")
 
+            # studio_config 键值配置表
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS studio_config (
+                    key VARCHAR(100) PRIMARY KEY,
+                    value TEXT DEFAULT '',
+                    updated_at DATETIME
+                )
+            """))
+            logger.info("✅ studio_config 表就绪")
+
+            # ── conversations 表 (Dogi 独立对话) ──
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title VARCHAR(200) DEFAULT '新对话',
+                    model VARCHAR(100) DEFAULT 'gpt-4o',
+                    tool_permissions JSON DEFAULT '["ask_user","read_source","read_config","search","tree","execute_readonly_command"]',
+                    role_id INTEGER REFERENCES roles(id),
+                    memory_summary TEXT,
+                    is_pinned BOOLEAN DEFAULT 0,
+                    is_archived BOOLEAN DEFAULT 0,
+                    created_by VARCHAR(100) DEFAULT 'user',
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """)
+            logger.info("✅ conversations 表就绪")
+
+            # messages 表: 添加 conversation_id 列
+            try:
+                cursor_msg = await db.execute("PRAGMA table_info(messages)")
+                msg_cols = {row[1] for row in await cursor_msg.fetchall()}
+                if "conversation_id" not in msg_cols:
+                    await db.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER REFERENCES conversations(id)")
+                    logger.info("✅ 自动迁移: 添加 messages.conversation_id")
+            except Exception:
+                pass
+
+            # ai_tasks 表: 添加 conversation_id 列
+            try:
+                cursor_at = await db.execute("PRAGMA table_info(ai_tasks)")
+                at_cols = {row[1] for row in await cursor_at.fetchall()}
+                if "conversation_id" not in at_cols:
+                    await db.execute("ALTER TABLE ai_tasks ADD COLUMN conversation_id INTEGER REFERENCES conversations(id)")
+                    logger.info("✅ 自动迁移: 添加 ai_tasks.conversation_id")
+            except Exception:
+                pass
+
             await db.commit()
     except Exception as e:
         logger.warning(f"⚠️ 自动迁移跳过: {e}")
@@ -418,9 +485,9 @@ async def _migrate_null_role_projects():
 
 
 app = FastAPI(
-    title="设计院 (Studio)",
-    description="AI 驱动的通用项目设计与需求迭代平台",
-    version="1.0.0",
+    title="Dogi (多吉)",
+    description="AI 驱动的通用对话与项目协作平台",
+    version="2.0.0",
     docs_url="/studio-api/docs",
     redoc_url="/studio-api/redoc",
     openapi_url="/studio-api/openapi.json",
@@ -538,6 +605,30 @@ async def _sync_active_workspace():
         logger.debug(f"工作目录同步跳过: {e}")
 
 
+async def _load_studio_config():
+    """启动时从 studio_config 表加载持久化配置，覆盖 settings 对应字段。
+
+    DB 配置优先于 .env，这样用户在界面上保存的值重启后仍有效。
+    """
+    from studio.backend.core.database import async_session_maker
+    from sqlalchemy import text
+
+    # 可覆盖的 settings 字段白名单
+    ALLOWED_KEYS = {"github_token", "github_repo"}
+
+    try:
+        async with async_session_maker() as db:
+            rows = (await db.execute(
+                text("SELECT key, value FROM studio_config WHERE key IN ('github_token', 'github_repo')")
+            )).all()
+            for key, value in rows:
+                if key in ALLOWED_KEYS and value:
+                    setattr(settings, key, value)
+                    logger.info(f"🔧 studio_config: {key} 已从 DB 加载")
+    except Exception as e:
+        logger.debug(f"studio_config 加载跳过: {e}")
+
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -572,9 +663,13 @@ app.include_router(users_router)
 app.include_router(command_auth_router)
 app.include_router(workspace_dirs_router)
 app.include_router(mcp_router)
+app.include_router(observability_router)
+app.include_router(conversations_router)
+app.include_router(voice_router)
+app.include_router(camera_router)
 
 
 @app.get("/studio-api/health")
 async def health_check():
-    """设计院健康检查"""
-    return {"status": "ok", "service": "studio"}
+    """Dogi 健康检查"""
+    return {"status": "ok", "service": "dogi"}

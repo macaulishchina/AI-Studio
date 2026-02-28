@@ -21,6 +21,15 @@ AI-Studio 提供了从需求讨论、方案设计、代码实施到部署上线�
 - **Node.js** 18+ (含 npm)
 - **Git**
 - (可选) **Docker** — 用于容器化部署
+- (可选) **系统音频/摄像头库** — 用于输入设备调试功能:
+  - `libportaudio2` / `libasound2-dev` — PortAudio + ALSA (音频采集)
+  - `libgl1` / `libglib2.0-0` — OpenCV 运行时
+  - `v4l-utils` — V4L2 摄像头工具
+
+  ```bash
+  # Ubuntu/Debian 一键安装
+  sudo apt install -y libportaudio2 libasound2-dev libgl1 libglib2.0-0 v4l-utils
+  ```
 
 ## 🚀 快速开始
 
@@ -116,6 +125,18 @@ docker run -d \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -e STUDIO_ADMIN_PASS=your-secure-password \
   -e GITHUB_TOKEN=ghp_xxxx \
+  ai-studio
+
+# 如需容器内使用 USB 摄像头/麦克风 (设备调试功能):
+docker run -d \
+  --name ai-studio \
+  -p 8002:8002 \
+  -v ai-studio-data:/data \
+  --device /dev/video0 \
+  --device /dev/snd \
+  --group-add $(stat -c '%g' /dev/snd/timer) \
+  --group-add $(stat -c '%g' /dev/video0) \
+  -e STUDIO_ADMIN_PASS=your-secure-password \
   ai-studio
 
 # 查看日志 (包含自动生成的管理员密码)
@@ -271,7 +292,52 @@ from studio.backend.models import Project
 - 自动迁移: 新增列在 `main.py → _auto_migrate()` 中定义
 - 删库重来: 删除 `dev-data/studio.db` 重启即可
 
-## 📝 常见问题
+## � 输入设备调试
+
+项目内置了输入设备调试页面 (`/studio/device-debug`)，支持：
+
+- **服务端音频**: 设备枚举、ALSA/PipeWire 驱动检测、SSE 实时电平、录音测试
+- **服务端摄像头**: V4L2 设备枚举、JPEG 快照、MJPEG 实时视频流
+- **浏览器麦克风**: getUserMedia 设备枚举、波形可视化、Web Speech API 语音识别、录音
+- **浏览器摄像头**: getUserMedia 预览、拍照
+
+### Linux 权限配置
+
+服务端音频/摄像头功能需要当前用户有 `audio` 和 `video` 组权限：
+
+```bash
+# 添加用户到 audio + video 组
+sudo usermod -aG audio,video $(whoami)
+
+# 重新登录使生效 (或 newgrp)
+newgrp audio
+newgrp video
+
+# 验证
+id  # 输出应包含 audio 和 video
+```
+
+### Docker 中访问设备
+
+```bash
+docker run ... \
+  --device /dev/video0 \
+  --device /dev/snd \
+  --group-add $(stat -c '%g' /dev/snd/timer) \
+  --group-add $(stat -c '%g' /dev/video0)
+```
+
+### Python 依赖
+
+| 包 | 用途 | 系统依赖 |
+| --- | --- | --- |
+| `sounddevice` | 音频采集 | `libportaudio2` |
+| `numpy` | 音频数据处理 | — |
+| `opencv-python-headless` | 摄像头采集 | `libgl1`, `libglib2.0-0` |
+
+> 这些包均为可选依赖，缺失时对应 API 会返回 `available: false` 而不会崩溃。
+
+## �📝 常见问题
 
 ### Q: `ModuleNotFoundError: No module named 'studio'`
 

@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean, Float, Enum, ForeignKey, JSON,
-    UniqueConstraint,
+    UniqueConstraint, func,
 )
 from sqlalchemy.orm import relationship
 
@@ -90,6 +90,15 @@ class UserRole(str, enum.Enum):
 
 
 # ======================== Models ========================
+
+class StudioConfig(Base):
+    """系统级键值配置（持久化存储，优先于 .env）"""
+    __tablename__ = "studio_config"
+
+    key = Column(String(100), primary_key=True)      # 配置键，如 github_token
+    value = Column(Text, default="")                  # 配置值
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
 
 class WorkspaceDir(Base):
     """工作目录配置 (支持多目录切换)"""
@@ -314,7 +323,8 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # nullable for conversation-only messages
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)  # Dogi 对话关联
     role = Column(Enum(MessageRole), nullable=False)
     sender_name = Column(String(100), default="")
     content = Column(Text, nullable=False)
@@ -339,6 +349,48 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project", back_populates="messages")
+    conversation = relationship("Conversation", back_populates="messages", foreign_keys="Message.conversation_id")
+
+
+class Conversation(Base):
+    """
+    独立对话 — Dogi 聊天入口创建的对话 (不绑定项目)
+
+    用户可直接发起 AI 对话, 支持工具调用、角色、技能等能力。
+    与 Project 解耦, 拥有独立的消息历史和上下文管理。
+    """
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), default="新对话")
+    model = Column(String(100), default="gpt-4o")
+
+    # 工具权限 (同 Project.tool_permissions)
+    tool_permissions = Column(JSON, default=lambda: [
+        "ask_user", "read_source", "read_config", "search", "tree", "execute_readonly_command"
+    ])
+
+    # 可选角色关联
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
+
+    # 上下文管理
+    memory_summary = Column(Text, nullable=True)  # 自动摘要压缩的历史上下文
+
+    # 状态
+    is_pinned = Column(Boolean, default=False)
+    is_archived = Column(Boolean, default=False)
+
+    # 元信息
+    created_by = Column(String(100), default="user")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关系
+    role = relationship("Role", lazy="joined")
+    messages = relationship("Message", back_populates="conversation",
+                            foreign_keys="Message.conversation_id",
+                            cascade="all, delete-orphan",
+                            order_by="Message.created_at")
 
 
 class Snapshot(Base):
@@ -570,7 +622,8 @@ class AiTask(Base):
     __tablename__ = "ai_tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # nullable for conversation tasks
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)  # Dogi 对话关联
     task_type = Column(String(50), nullable=False, default="discuss")  # discuss / finalize_plan / auto_review
     status = Column(String(20), nullable=False, default="pending")     # pending / running / completed / failed / cancelled
 

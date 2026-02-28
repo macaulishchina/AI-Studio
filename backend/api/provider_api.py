@@ -194,9 +194,10 @@ async def update_provider(slug: str, data: ProviderUpdate):
                 provider.base_url = data.base_url
         if data.api_key is not None:
             provider.api_key = data.api_key
-            # GitHub Models 作为“全局 AI Token”来源，实时同步到运行时配置
+            # GitHub Models 作为“全局 AI Token”来源，通过统一配置服务同步
             if provider.slug == "github":
-                settings.github_token = data.api_key
+                from studio.backend.services.config_service import set_github_token
+                await set_github_token(data.api_key)
         if data.enabled is not None:
             provider.enabled = data.enabled
         if data.icon is not None:

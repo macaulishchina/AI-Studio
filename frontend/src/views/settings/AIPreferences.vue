@@ -5,7 +5,7 @@
     </n-alert>
 
     <!-- 模型筛选 -->
-    <n-card size="small" style="background: #16213e">
+    <n-card size="small" style="background: #212121">
       <template #header>
         <n-space align="center" :size="8">
           <span>🎯 模型筛选</span>
@@ -27,7 +27,7 @@
     </n-card>
 
     <!-- 工具调用轮次 & AI 行为 -->
-    <n-card size="small" style="background: #16213e">
+    <n-card size="small" style="background: #212121">
       <template #header>
         <n-space align="center" :size="8">
           <span>🔧 工具调用 & AI 行为</span>
@@ -64,7 +64,7 @@
     </n-card>
 
     <!-- 模型黑名单 -->
-    <n-card size="small" style="background: #16213e">
+    <n-card size="small" style="background: #212121">
       <template #header>
         <n-space align="center" :size="8">
           <span>🚫 模型黑名单</span>

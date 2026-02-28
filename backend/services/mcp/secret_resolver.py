@@ -101,12 +101,19 @@ async def _collect_variables(
                 )).scalar_one_or_none()
 
             if ws:
-                variables["github_token"] = ws.github_token or ""
-                variables["github_repo"] = ws.github_repo or ""
-                variables["gitlab_token"] = ws.gitlab_token or ""
-                variables["gitlab_repo"] = ws.gitlab_repo or ""
-                variables["gitlab_url"] = ws.gitlab_url or ""
-                variables["workspace_path"] = ws.path or ""
+                # 仅设置非空值，空值留给 settings fallback
+                if ws.github_token:
+                    variables["github_token"] = ws.github_token
+                if ws.github_repo:
+                    variables["github_repo"] = ws.github_repo
+                if ws.gitlab_token:
+                    variables["gitlab_token"] = ws.gitlab_token
+                if ws.gitlab_repo:
+                    variables["gitlab_repo"] = ws.gitlab_repo
+                if ws.gitlab_url:
+                    variables["gitlab_url"] = ws.gitlab_url
+                if ws.path:
+                    variables["workspace_path"] = ws.path
 
     except Exception as e:
         logger.warning(f"SecretResolver: DB 查询失败: {e}")

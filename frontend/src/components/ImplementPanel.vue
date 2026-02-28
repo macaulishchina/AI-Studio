@@ -24,7 +24,7 @@
     </n-alert>
 
     <!-- ═══════════ 区域 1: 操作栏 ═══════════ -->
-    <n-card style="background: #16213e; margin-bottom: 16px" :content-style="{ padding: '16px' }">
+    <n-card style="background: #212121; margin-bottom: 16px" :content-style="{ padding: '16px' }">
       <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
         <!-- 分支选择 -->
         <n-tooltip trigger="hover" placement="bottom">
@@ -126,7 +126,7 @@
     <!-- ═══════════ 区域 2: 进度 + 状态 (合并为一张卡) ═══════════ -->
     <n-card
       v-if="implStatus && implStatus.status !== 'not_started'"
-      style="background: #16213e; margin-bottom: 16px"
+      style="background: #212121; margin-bottom: 16px"
       :content-style="{ padding: '20px' }"
     >
       <!-- 进度条 -->
@@ -212,7 +212,7 @@
     <!-- ═══════════ 区域 3: 编码完成 → 操作 ═══════════ -->
     <n-card
       v-if="isAgentDone"
-      style="background: linear-gradient(135deg, #16213e 0%, #1a3a2a 100%); margin-bottom: 16px; border: 1px solid rgba(99,226,184,0.2)"
+      style="background: linear-gradient(135deg, #212121 0%, #1a3a2a 100%); margin-bottom: 16px; border: 1px solid rgba(99,226,184,0.2)"
       :content-style="{ padding: '24px' }"
     >
       <div style="text-align: center; margin-bottom: 16px">
@@ -241,7 +241,7 @@
     <!-- PR 已合并 -->
     <n-card
       v-if="implStatus?.status === 'pr_merged'"
-      style="background: linear-gradient(135deg, #16213e 0%, #1a3a2a 100%); margin-bottom: 16px; border: 1px solid rgba(99,226,184,0.2)"
+      style="background: linear-gradient(135deg, #212121 0%, #1a3a2a 100%); margin-bottom: 16px; border: 1px solid rgba(99,226,184,0.2)"
       :content-style="{ padding: '20px', textAlign: 'center' }"
     >
       <div style="font-size: 36px; margin-bottom: 6px">🎉</div>
@@ -249,7 +249,7 @@
     </n-card>
 
     <!-- ═══════════ PR Diff 查看 (可折叠) ═══════════ -->
-    <n-card v-if="diffData" style="background: #16213e; margin-bottom: 16px" :content-style="{ padding: '12px 16px' }">
+    <n-card v-if="diffData" style="background: #212121; margin-bottom: 16px" :content-style="{ padding: '12px 16px' }">
       <template #header>
         <span style="font-size: 14px">📝 PR Diff</span>
       </template>

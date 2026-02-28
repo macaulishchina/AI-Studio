@@ -16,7 +16,7 @@
     </n-space>
 
     <!-- 全局状态摘要 -->
-    <n-card size="small" style="background: #16213e; margin-bottom: 16px" v-if="globalStatus">
+    <n-card size="small" style="background: #212121; margin-bottom: 16px" v-if="globalStatus">
       <n-space :size="16" align="center">
         <n-statistic label="已注册" :value="globalStatus.registered" />
         <n-statistic label="已启用" :value="globalStatus.enabled" />
@@ -31,8 +31,8 @@
       </n-space>
     </n-card>
 
-    <!-- GitHub MCP 快速凭据入口（覆盖当前活跃工作目录设置） -->
-    <n-card title="🔐 GitHub MCP 凭据" size="small" style="background: #16213e; margin-bottom: 16px">
+    <!-- GitHub MCP 系统级凭据配置 -->
+    <n-card title="🔐 GitHub MCP 凭据" size="small" style="background: #212121; margin-bottom: 16px">
       <template #header-extra>
         <n-space :size="8" align="center">
           <n-button size="tiny" quaternary :loading="loadingGithubPanel" @click="loadActiveGithubConfig">
@@ -53,7 +53,7 @@
 
       <div class="cred-panel">
         <n-text depth="3" class="cred-hint">
-          保存后会覆盖当前活跃工作目录的 GitHub 凭据（优先于 .env 的 GITHUB_TOKEN）。
+          系统级 GitHub Token 配置，初始值来自 .env 的 GITHUB_TOKEN。
         </n-text>
 
         <n-space class="cred-badges" :size="8" align="center" :wrap="true">
@@ -62,9 +62,6 @@
           </n-tag>
           <n-tag v-if="githubMaskedToken" size="small" :bordered="false" type="success" round>
             {{ githubMaskedToken }}
-          </n-tag>
-          <n-tag size="small" :bordered="false" type="info" round>
-            📁 {{ activeWorkspacePath || '未选择活跃目录' }}
           </n-tag>
         </n-space>
 
@@ -78,21 +75,14 @@
             placeholder="输入新的 GitHub Token（留空则不改）"
             @keyup.enter="saveGithubOverride"
           />
-          <n-input
-            v-model:value="githubRepoInput"
-            class="cred-repo"
-            clearable
-            placeholder="owner/repo（可选）"
-            @keyup.enter="saveGithubOverride"
-          />
           <n-space class="cred-actions" :size="8" align="center">
             <n-button
               type="primary"
               :loading="savingGithubCred"
-              :disabled="!canSaveGithubOverride"
+              :disabled="!canSaveGithubCred"
               @click="saveGithubOverride"
             >
-              💾 保存覆盖
+              💾 保存配置
             </n-button>
             <n-popconfirm @positive-click="clearGithubTokenOverride">
               <template #trigger>
@@ -100,7 +90,7 @@
                   🧹 清空 Token
                 </n-button>
               </template>
-              确认清空当前活跃目录的 GitHub Token？
+              确认清空系统 GitHub Token 配置？
             </n-popconfirm>
           </n-space>
         </div>
@@ -114,7 +104,7 @@
           v-for="server in servers"
           :key="server.slug"
           size="small"
-          style="background: #1a1a2e"
+          style="background: #1a1a1a"
           hoverable
         >
           <!-- 服务头部 -->
@@ -220,7 +210,7 @@
     </n-spin>
 
     <!-- 审计日志 -->
-    <n-card title="📋 MCP 调用日志" size="small" style="background: #16213e; margin-top: 24px">
+    <n-card title="📋 MCP 调用日志" size="small" style="background: #212121; margin-top: 24px">
       <template #header-extra>
         <n-space :size="8">
           <n-button size="small" @click="loadAuditLog" :loading="loadingAudit">🔄</n-button>
@@ -445,7 +435,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, h, computed } from 'vue'
 import { useMessage, NTag, NText } from 'naive-ui'
-import { mcpApi, systemApi, workspaceDirApi } from '@/api'
+import { mcpApi, systemApi } from '@/api'
 
 const message = useMessage()
 
@@ -458,16 +448,14 @@ const healthMap = ref<Record<string, string>>({})
 const serverTools = ref<Record<string, any[]>>({})
 const connecting = ref<Record<string, boolean>>({})
 
-// GitHub MCP 快速设置
+// GitHub MCP 系统级凭据
 const githubTokenInput = ref('')
-const githubRepoInput = ref('')
 const githubTokenConfigured = ref(false)
 const githubMaskedToken = ref('')
-const activeWorkspacePath = ref('')
 const savingGithubCred = ref(false)
 const loadingGithubPanel = ref(false)
 const reconnectingGithub = ref(false)
-const canSaveGithubOverride = computed(() => !!(githubTokenInput.value.trim() || githubRepoInput.value.trim()))
+const canSaveGithubCred = computed(() => !!githubTokenInput.value.trim())
 
 // 审计日志
 const loadingAudit = ref(false)
@@ -562,7 +550,15 @@ async function loadStatus() {
   loadingStatus.value = true
   try {
     const { data } = await mcpApi.status()
-    globalStatus.value = data
+    const servers = Array.isArray(data?.servers) ? data.servers : []
+    const toolsFromServers = servers.reduce((sum: number, server: any) => sum + (Number(server?.tools_count) || 0), 0)
+
+    globalStatus.value = {
+      registered: Number(data?.registered ?? data?.total_servers ?? 0),
+      enabled: Number(data?.enabled ?? data?.enabled_servers ?? 0),
+      connected: Number(data?.connected ?? data?.connected_servers ?? 0),
+      total_tools: Number(data?.total_tools ?? toolsFromServers),
+    }
   } catch { /* ignore */ } finally {
     loadingStatus.value = false
   }
@@ -571,7 +567,21 @@ async function loadStatus() {
 async function loadHealth() {
   try {
     const { data } = await mcpApi.health()
-    healthMap.value = data
+    const normalized: Record<string, string> = {}
+    for (const [slug, state] of Object.entries(data || {})) {
+      if (typeof state === 'string') {
+        normalized[slug] = state
+        continue
+      }
+
+      const s = state as any
+      if (s?.connected) {
+        normalized[slug] = s?.healthy === false ? 'error' : 'connected'
+      } else {
+        normalized[slug] = 'disconnected'
+      }
+    }
+    healthMap.value = normalized
   } catch { /* ignore */ }
 }
 
@@ -606,9 +616,13 @@ async function loadAuditStats() {
 
 async function refreshAll() {
   await Promise.all([loadServers(), loadStatus(), loadHealth(), loadActiveGithubConfig()])
+  await autoConnectEnabledServers()
+
   // 加载每个已启用服务的工具
   for (const s of servers.value) {
-    if (s.enabled) loadServerTools(s.slug)
+    if (s.enabled) {
+      await loadServerTools(s.slug)
+    }
   }
 }
 
@@ -632,48 +646,26 @@ async function loadActiveGithubConfig() {
   loadingGithubPanel.value = true
   githubMaskedToken.value = ''
   try {
-    const statusResp = await systemApi.status()
-    const gh = statusResp?.data?.github || {}
-    const scope = gh?.scope || {}
-    githubMaskedToken.value = gh?.masked_token || ''
-    githubTokenConfigured.value = !!githubMaskedToken.value
-    if (scope?.workspace_path) {
-      activeWorkspacePath.value = scope.workspace_path
-    }
-
-    const { data } = await workspaceDirApi.list()
-    const active = (data || []).find((d: any) => d.is_active)
-    if (active) {
-      activeWorkspacePath.value = active.path || ''
-      // 仅在后端明确有 token 且 overview 未返回脱敏值时，显示已配置
-      githubTokenConfigured.value = !!(githubMaskedToken.value || active.github_token_configured)
-      githubRepoInput.value = active.github_repo || ''
-      return
-    }
+    const { data } = await systemApi.getGithubTokenStatus()
+    githubMaskedToken.value = data?.masked_token || ''
+    githubTokenConfigured.value = !!data?.configured
   } catch {
     // ignore
   } finally {
     loadingGithubPanel.value = false
   }
-  activeWorkspacePath.value = ''
-  githubTokenConfigured.value = false
 }
 
 async function saveGithubOverride() {
-  if (!githubTokenInput.value.trim() && !githubRepoInput.value.trim()) {
-    message.warning('请至少填写 Token 或仓库')
+  if (!githubTokenInput.value.trim()) {
+    message.warning('请输入 Token')
     return
   }
   savingGithubCred.value = true
   try {
-    if (githubTokenInput.value.trim()) {
-      await systemApi.setGithubToken(githubTokenInput.value.trim())
-      githubTokenInput.value = ''
-    }
-    if (githubRepoInput.value.trim()) {
-      await systemApi.setGithubRepo(githubRepoInput.value.trim())
-    }
-    message.success('GitHub 覆盖设置已保存')
+    await systemApi.setGithubToken(githubTokenInput.value.trim())
+    githubTokenInput.value = ''
+    message.success('GitHub 凭据已保存')
     await loadActiveGithubConfig()
   } catch (e: any) {
     message.error('保存失败: ' + (e.response?.data?.detail || e.message))
@@ -687,7 +679,7 @@ async function clearGithubTokenOverride() {
   try {
     await systemApi.clearGithubToken()
     githubTokenInput.value = ''
-    message.success('已清空 GitHub Token')
+    message.success('已清空系统 GitHub Token')
     await loadActiveGithubConfig()
   } catch (e: any) {
     message.error('清空失败: ' + (e.response?.data?.detail || e.message))
@@ -711,6 +703,28 @@ async function toggleEnabled(server: any, enabled: boolean) {
   } catch (e: any) {
     message.error('操作失败: ' + (e.response?.data?.detail || e.message))
   }
+}
+
+async function autoConnectEnabledServers() {
+  const toConnect = servers.value.filter(
+    (server: any) => server.enabled && connectionStatus(server.slug) !== 'connected'
+  )
+  if (!toConnect.length) return
+
+  for (const server of toConnect) {
+    connecting.value[server.slug] = true
+    try {
+      await mcpApi.connect(server.slug)
+      healthMap.value[server.slug] = 'connected'
+      await loadServerTools(server.slug)
+    } catch {
+      // 自动重连失败时静默，保持手动连接入口可用
+    } finally {
+      connecting.value[server.slug] = false
+    }
+  }
+
+  await Promise.all([loadStatus(), loadHealth()])
 }
 
 async function handleConnect(slug: string) {
@@ -875,7 +889,7 @@ async function reconnectGithubServer() {
 
 .cred-form-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(220px, 280px) auto;
+  grid-template-columns: minmax(300px, 1fr) auto;
   gap: 10px;
   align-items: center;
 }

@@ -1,7 +1,7 @@
 <template>
   <n-space vertical :size="16">
     <!-- 模型能力管理 -->
-    <n-card size="small" style="background: #16213e">
+    <n-card size="small" style="background: #212121">
       <template #header>
         <n-space align="center" :size="8">
           <span>📊 模型能力管理</span>

@@ -26,10 +26,10 @@
   padding: 0;
 }
 .markdown-body p { margin: 0.4em 0; }
-.markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #e94560; margin: 0.6em 0 0.3em; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #7c6cff; margin: 0.6em 0 0.3em; }
 .markdown-body ul, .markdown-body ol { padding-left: 1.5em; }
 .markdown-body blockquote {
-  border-left: 3px solid #e94560;
+  border-left: 3px solid #7c6cff;
   margin: 0.4em 0;
   padding: 0.3em 0.8em;
   background: rgba(233, 69, 96, 0.1);
@@ -509,7 +509,7 @@
   color: #777;
 }
 .ctx-role-user { color: #0ea5e9; }
-.ctx-role-assistant { color: #e94560; }
+.ctx-role-assistant { color: #7c6cff; }
 .ctx-role-system { color: #63e2b7; }
 .ctx-dot {
   display: inline-block;
@@ -563,7 +563,7 @@
 
 /* ============ 输入区布局 ============ */
 .input-area {
-  background: #16213e;
+  background: #212121;
   border-radius: 8px;
   padding: 5px 8px;
   flex-shrink: 0;

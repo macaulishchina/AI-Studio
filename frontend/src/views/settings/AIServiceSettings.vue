@@ -185,7 +185,7 @@
         </template>
 
         <!-- ===== 未配置的第三方 (默认折叠) ===== -->
-        <n-card v-if="unconfiguredProviders.length" size="small" style="background: #16213e; opacity: 0.85">
+        <n-card v-if="unconfiguredProviders.length" size="small" style="background: #212121; opacity: 0.85">
           <n-space align="center" :size="8" @click="showUnconfigured = !showUnconfigured" style="cursor: pointer; user-select: none">
             <n-text strong style="font-size: 13px">📦 更多预设提供商</n-text>
             <n-tag size="small">{{ unconfiguredProviders.length }} 个未配置</n-tag>
@@ -193,7 +193,7 @@
           </n-space>
 
           <n-space v-if="showUnconfigured" vertical :size="12" style="margin-top: 12px">
-            <n-card v-for="p in unconfiguredProviders" :key="p.slug" size="small" style="background: #16213e; opacity: 0.9">
+            <n-card v-for="p in unconfiguredProviders" :key="p.slug" size="small" style="background: #212121; opacity: 0.9">
               <template #header>
                 <n-space align="center" :size="8">
                   <span v-html="getProviderIcon(p.slug, p.name, 20)" style="display:inline-flex"></span>
@@ -271,7 +271,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { providerApi, copilotAuthApi, modelApi } from '@/api'
+import { providerApi, copilotAuthApi, modelApi, systemApi } from '@/api'
 import { getProviderIcon } from '@/utils/providerIcons'
 
 const message = useMessage()
@@ -320,10 +320,10 @@ const quotaUsedPercent = computed(() => {
 })
 
 function cardStyle(p: any) {
-  if (p.slug === 'copilot' && copilotStatus.value.authenticated) return 'background: #16213e; border-left: 3px solid #18a058'
-  if (p.slug === 'github') return 'background: #16213e; border-left: 3px solid #4098fc'
-  if (p.enabled && p.api_key_set) return 'background: #16213e; border-left: 3px solid #18a058'
-  return 'background: #16213e; opacity: 0.8'
+  if (p.slug === 'copilot' && copilotStatus.value.authenticated) return 'background: #212121; border-left: 3px solid #18a058'
+  if (p.slug === 'github') return 'background: #212121; border-left: 3px solid #4098fc'
+  if (p.enabled && p.api_key_set) return 'background: #212121; border-left: 3px solid #18a058'
+  return 'background: #212121; opacity: 0.8'
 }
 
 // ==================== 第三方提供商操作 ====================
@@ -361,7 +361,7 @@ async function saveGithubToken() {
   if (!token) return
   savingGithubToken.value = true
   try {
-    await providerApi.update('github', { api_key: token, enabled: true })
+    await systemApi.setGithubToken(token)
     githubTokenInput.value = ''
     message.success('GitHub Models 全局 Token 已保存')
     await loadProviders()
@@ -375,7 +375,7 @@ async function saveGithubToken() {
 
 async function clearGithubToken() {
   try {
-    await providerApi.update('github', { api_key: '' })
+    await systemApi.clearGithubToken()
     message.success('GitHub Models 全局 Token 已清除')
     await loadProviders()
     await modelApi.refresh()

@@ -40,7 +40,7 @@
 
     <!-- 内容区 -->
     <div style="flex: 1; overflow-y: auto;">
-      <n-card v-if="!displayContent && !editing" style="background: #16213e">
+      <n-card v-if="!displayContent && !editing" style="background: #212121">
         <n-empty :description="`还没有${props.outputNoun || '设计稿'}，请在讨论区完成讨论后点击「${props.finalizeAction || '敲定方案'}」`" />
       </n-card>
 
@@ -62,7 +62,7 @@
       </div>
 
       <!-- 预览模式 (默认: 渲染 Markdown) -->
-      <n-card v-else-if="displayContent" style="background: #16213e">
+      <n-card v-else-if="displayContent" style="background: #212121">
         <div class="plan-markdown-body" v-html="renderedPlan" />
       </n-card>
     </div>
@@ -224,12 +224,12 @@ watch(() => props.project.plan_version, () => {
 }
 .plan-markdown-body p { margin: 0.5em 0; }
 .plan-markdown-body h1, .plan-markdown-body h2, .plan-markdown-body h3 {
-  color: #e94560;
+  color: #7c6cff;
   margin: 0.7em 0 0.3em;
 }
 .plan-markdown-body ul, .plan-markdown-body ol { padding-left: 1.5em; }
 .plan-markdown-body blockquote {
-  border-left: 3px solid #e94560;
+  border-left: 3px solid #7c6cff;
   margin: 0.5em 0;
   padding: 0.4em 1em;
   background: rgba(233, 69, 96, 0.1);
@@ -249,7 +249,7 @@ watch(() => props.project.plan_version, () => {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  background: #16213e;
+  background: #212121;
   border-radius: 6px;
   padding: 12px;
 }

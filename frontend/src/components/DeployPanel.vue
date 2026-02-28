@@ -36,7 +36,7 @@
     </n-card>
 
     <!-- 部署历史 -->
-    <n-card title="📜 部署历史" size="small" style="background: #16213e">
+    <n-card title="📜 部署历史" size="small" style="background: #212121">
       <n-timeline v-if="deployments.length">
         <n-timeline-item
           v-for="d in deployments"

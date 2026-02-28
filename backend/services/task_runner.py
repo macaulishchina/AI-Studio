@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studio.backend.core.database import async_session_maker
 from studio.backend.models import (
-    AiTask, Message, MessageRole, MessageType, Project, ProjectStatus, Role,
+    AiTask, Message, MessageRole, MessageType, Project, ProjectStatus, Role, Conversation,
 )
 
 logger = logging.getLogger(__name__)
@@ -542,6 +542,56 @@ class TaskManager:
             _execute_discussion(rt, project_id, model, 30)
         )
         rt._asyncio_task.add_done_callback(lambda _: cls._on_task_done(task_id, project_id))
+
+        return task_id
+
+    @classmethod
+    async def start_conversation_task(
+        cls,
+        conversation_id: int,
+        model: str,
+        sender_name: str = "user",
+        message: str = "",
+        attachments: list = None,
+        max_tool_rounds: int = 15,
+        regenerate: bool = False,
+    ) -> int:
+        """创建对话 AI 任务 (不绑定项目) 并启动后台执行, 返回 task_id"""
+        from studio.backend.models import Conversation
+        async with async_session_maker() as db:
+            task = AiTask(
+                conversation_id=conversation_id,
+                task_type="discuss",
+                status="pending",
+                model=model,
+                sender_name=sender_name,
+                input_message=message,
+                input_attachments=attachments or [],
+                max_tool_rounds=max_tool_rounds,
+                regenerate=regenerate,
+            )
+            db.add(task)
+            await db.commit()
+            task_id = task.id
+
+        # 使用负数 conversation_id 作为事件总线的 key, 避免与 project_id 冲突
+        scope_id = -conversation_id
+        rt = RunningTask(task_id, scope_id, sender_name=sender_name, model=model)
+        cls._tasks[task_id] = rt
+        cls._project_tasks.setdefault(scope_id, set()).add(task_id)
+
+        # 通知事件总线
+        bus = ProjectEventBus.get_or_create(scope_id)
+        bus.publish({"type": "task_started", "task_id": task_id, "model": model, "sender_name": sender_name})
+
+        rt._asyncio_task = asyncio.create_task(
+            _execute_conversation(rt, conversation_id, model, max_tool_rounds)
+        )
+        rt._asyncio_task.add_done_callback(lambda _: cls._on_task_done(task_id, scope_id))
+
+        if not cls._cleanup_started:
+            cls._cleanup_started = True
+            asyncio.create_task(cls._cleanup_loop())
 
         return task_id
 
@@ -1074,3 +1124,355 @@ async def _persist_task_final(
                 await db.commit()
     except Exception as e:
         logger.warning(f"持久化任务最终状态失败: {e}")
+
+
+# ======================== 对话执行逻辑 (Conversation, 不绑定项目) ========================
+
+async def _execute_conversation(
+    rt: RunningTask,
+    conversation_id: int,
+    model: str,
+    max_tool_rounds: int,
+):
+    """
+    后台执行独立对话 AI — 与 _execute_discussion 类似但不依赖 Project.
+    """
+    from studio.backend.services import ai_service, context_service
+    from studio.backend.services.ai_service import new_request_id
+    from studio.backend.services.context_manager import (
+        prepare_context, build_usage_summary,
+        summarize_context_if_needed, _generate_summary,
+    )
+    from studio.backend.services.tool_registry import (
+        get_tool_definitions, execute_tool, DEFAULT_PERMISSIONS,
+    )
+    from studio.backend.core.model_capabilities import capability_cache
+    from studio.backend.core.config import settings
+    from studio.backend.models import Conversation, Skill
+
+    await _update_task_status(rt.task_id, "running")
+    rt.status = "running"
+
+    full_response: List[str] = []
+    thinking_parts: List[str] = []
+    collected_tool_calls: List[dict] = []
+    collected_errors: List[str] = []
+    token_usage = None
+
+    try:
+        async with async_session_maker() as db:
+            result = await db.execute(select(Conversation).where(Conversation.id == conversation_id))
+            conv = result.scalar_one_or_none()
+            if not conv:
+                rt.emit({"type": "error", "error": "对话不存在"})
+                rt.status = "failed"
+                rt.error = "对话不存在"
+                await _persist_task_final(rt, "failed")
+                return
+
+            # ---- 构建消息历史 ----
+            msg_result = await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at)
+            )
+            history_msgs = msg_result.scalars().all()
+
+            ai_messages = []
+            for msg in history_msgs:
+                if msg.message_type == MessageType.plan_final:
+                    continue
+                entry = {"role": msg.role.value, "content": msg.content}
+                if msg.attachments:
+                    images = []
+                    for att in msg.attachments:
+                        if att.get("type") == "image" and att.get("base64"):
+                            images.append({
+                                "base64": att["base64"],
+                                "mime_type": att.get("mime_type", "image/png"),
+                            })
+                    if images:
+                        entry["images"] = images
+                ai_messages.append(entry)
+
+            # ---- 系统 prompt ----
+            max_input = capability_cache.get_max_input(model)
+            system_budget = max(int(max_input * 0.15), 2000)
+
+            # 可选角色
+            role_obj = None
+            if conv.role_id:
+                sk_result = await db.execute(
+                    select(Role).where(Role.id == conv.role_id, Role.is_enabled.is_(True))
+                )
+                role_obj = sk_result.scalar_one_or_none()
+
+            # 加载角色技能
+            active_skills = []
+            if role_obj and role_obj.default_skills:
+                skill_names = role_obj.default_skills or []
+                if skill_names:
+                    sk_q = await db.execute(
+                        select(Skill).where(
+                            Skill.name.in_(skill_names),
+                            Skill.is_enabled.is_(True),
+                        )
+                    )
+                    active_skills = list(sk_q.scalars().all())
+
+            # 如有历史摘要, 注入上下文
+            extra_parts = []
+            if conv.memory_summary:
+                extra_parts.append(f"\n## 对话历史摘要\n{conv.memory_summary}")
+
+            raw_perms = conv.tool_permissions
+            tool_permissions = set(raw_perms) if raw_perms else set(DEFAULT_PERMISSIONS)
+
+            system_prompt, system_sections = context_service.build_project_context(
+                role=role_obj,
+                extra_context="\n".join(extra_parts) if extra_parts else "",
+                budget_tokens=system_budget,
+                return_sections=True,
+                tool_permissions=tool_permissions,
+                skills=active_skills,
+            )
+
+        # ---- 上下文自动总结 ----
+        ai_messages, summary_text = await summarize_context_if_needed(
+            messages=ai_messages,
+            system_prompt=system_prompt,
+            model=model,
+        )
+        if summary_text:
+            try:
+                async with async_session_maker() as save_db:
+                    summary_msg = Message(
+                        conversation_id=conversation_id,
+                        role=MessageRole.system,
+                        sender_name="Context Summary",
+                        content=f"[对话历史总结]\n\n{summary_text}",
+                        message_type=MessageType.chat,
+                        model_used=model,
+                    )
+                    save_db.add(summary_msg)
+                    await save_db.commit()
+            except Exception as se:
+                logger.warning(f"保存对话上下文总结失败: {se}")
+
+        # ---- 工具定义 ----
+        from studio.backend.api.discussion import _check_model_supports_tools
+        model_supports_tools = await _check_model_supports_tools(model)
+        if not model_supports_tools:
+            tool_permissions = set()
+            tool_defs = []
+        else:
+            tool_defs = get_tool_definitions(tool_permissions)
+
+        managed_messages, usage_info = prepare_context(
+            messages=ai_messages,
+            system_prompt=system_prompt,
+            model=model,
+            tool_definitions=tool_defs,
+        )
+
+        workspace_path = settings.workspace_path
+
+        async def _command_approval_fn(command: str, tool_call_id: str) -> dict:
+            return await rt.request_command_approval(command, tool_call_id)
+
+        async def _tool_executor(name: str, arguments: dict) -> str:
+            return await execute_tool(
+                name, arguments, workspace_path, tool_permissions,
+                command_approval_fn=_command_approval_fn,
+            )
+
+        # ---- 发送上下文信息 ----
+        context_summary = build_usage_summary(
+            usage_info, system_sections=system_sections,
+            history_messages=managed_messages,
+        )
+        rt.emit({"type": "context", "context": context_summary})
+
+        if summary_text:
+            rt.emit({"type": "summary", "summary": summary_text})
+
+        # ---- AI 流式调用 ----
+        current_managed_messages = managed_messages
+
+        for _attempt in range(2):
+            if rt._cancel_requested:
+                break
+            overflow_retry = False
+
+            async for event in ai_service.chat_stream(
+                messages=current_managed_messages,
+                model=model,
+                system_prompt=system_prompt,
+                tools=tool_defs if tool_defs else None,
+                tool_executor=_tool_executor,
+                request_id=new_request_id(),
+                max_tool_rounds=max_tool_rounds,
+            ):
+                if rt._cancel_requested:
+                    break
+                if not isinstance(event, dict):
+                    continue
+                event_type = event.get("type", "")
+
+                if event_type == "content":
+                    full_response.append(event["content"])
+                    rt.emit({"type": "content", "content": event["content"]})
+                elif event_type == "thinking":
+                    thinking_parts.append(event["content"])
+                    rt.emit({"type": "thinking", "content": event["content"]})
+                elif event_type == "tool_call_start":
+                    rt.emit({"type": "tool_call_start", "tool_call": event["tool_call"]})
+                elif event_type == "tool_call":
+                    rt.emit({"type": "tool_call", "tool_call": event["tool_call"]})
+                elif event_type == "tool_result":
+                    collected_tool_calls.append({
+                        "id": event["tool_call_id"],
+                        "name": event["name"],
+                        "arguments": event.get("arguments", {}),
+                        "result": event["result"],
+                        "duration_ms": event.get("duration_ms", 0),
+                    })
+                    rt.emit({
+                        "type": "tool_result",
+                        "tool_call_id": event["tool_call_id"],
+                        "name": event["name"],
+                        "result": event["result"],
+                        "arguments": event.get("arguments", {}),
+                        "duration_ms": event.get("duration_ms", 0),
+                    })
+                elif event_type == "tool_error":
+                    collected_tool_calls.append({
+                        "id": event["tool_call_id"],
+                        "name": event["name"],
+                        "arguments": {},
+                        "result": f"ERROR: {event['error']}",
+                        "duration_ms": 0,
+                    })
+                    rt.emit({
+                        "type": "tool_error",
+                        "tool_call_id": event["tool_call_id"],
+                        "name": event["name"],
+                        "error": event["error"],
+                    })
+                elif event_type == "usage":
+                    token_usage = event["usage"]
+                    rt.emit({"type": "usage", "usage": token_usage})
+                elif event_type == "truncated":
+                    rt.emit({"type": "truncated"})
+                elif event_type == "ask_user_pending":
+                    rt.emit({"type": "ask_user_pending"})
+                elif event_type == "error":
+                    error_meta = event.get('error_meta', {})
+                    if (error_meta.get('error_type') == 'context_overflow'
+                            and not full_response and _attempt == 0):
+                        logger.info("对话上下文超限，自动压缩后重试...")
+                        rt.emit({"type": "content", "content": "\n\n⏳ 上下文超限，正在自动压缩后重试...\n\n"})
+                        try:
+                            min_keep = min(len(ai_messages), 4)
+                            to_summarize_part = ai_messages[:-min_keep] if min_keep < len(ai_messages) else []
+                            recent_part = ai_messages[-min_keep:]
+                            if to_summarize_part:
+                                compress_summary = await _generate_summary(to_summarize_part, model)
+                                if compress_summary:
+                                    compressed = [{"role": "system", "content": f"[对话历史总结]\n\n{compress_summary}"}] + recent_part
+                                    current_managed_messages, _ = prepare_context(
+                                        messages=compressed, system_prompt=system_prompt,
+                                        model=model, tool_definitions=tool_defs,
+                                    )
+                                    overflow_retry = True
+                                    full_response.clear()
+                                    break
+                        except Exception as ce:
+                            logger.warning(f"对话自动压缩失败: {ce}")
+                        if not overflow_retry:
+                            collected_errors.append(event['error'])
+                            rt.emit({'type': 'error', 'error': event['error']})
+                    else:
+                        collected_errors.append(event['error'])
+                        err_data = {'type': 'error', 'error': event['error']}
+                        if event.get('error_meta'):
+                            err_data['error_meta'] = event['error_meta']
+                        rt.emit(err_data)
+
+            if not overflow_retry:
+                break
+
+        # ---- 保存 AI 回复 ----
+        ai_content = "".join(full_response)
+        if not ai_content and collected_errors:
+            error_text = collected_errors[-1]
+            brief = error_text[:300] + '...' if len(error_text) > 300 else error_text
+            ai_content = f"**⚠️ AI 服务错误**\n\n❌ {brief}"
+        thinking_content = "".join(thinking_parts) if thinking_parts else None
+
+        ai_msg_id = None
+        for attempt in range(3):
+            try:
+                async with async_session_maker() as save_db:
+                    ai_msg = Message(
+                        conversation_id=conversation_id,
+                        role=MessageRole.assistant,
+                        sender_name=model,
+                        content=ai_content,
+                        message_type=MessageType.chat,
+                        model_used=model,
+                        token_usage=token_usage,
+                        thinking_content=thinking_content,
+                        tool_calls=collected_tool_calls if collected_tool_calls else None,
+                    )
+                    save_db.add(ai_msg)
+                    await save_db.commit()
+                    ai_msg_id = ai_msg.id
+                break
+            except Exception as save_err:
+                logger.warning(f"保存对话 AI 回复失败 (尝试 {attempt+1}/3): {save_err}")
+                if attempt < 2:
+                    await asyncio.sleep(0.5)
+
+        rt.result_message_id = ai_msg_id
+        rt.emit({"type": "done", "message_id": ai_msg_id or -1})
+        rt.status = "completed"
+        rt.completed_at = datetime.utcnow()
+        await _persist_task_final(rt, "completed", ai_content, thinking_content, collected_tool_calls, token_usage, ai_msg_id)
+
+    except asyncio.CancelledError:
+        logger.info(f"对话任务 {rt.task_id} 被取消")
+        rt.status = "cancelled"
+        rt.completed_at = datetime.utcnow()
+        rt.emit({"type": "cancelled"})
+        await _persist_task_final(rt, "cancelled")
+
+    except Exception as e:
+        logger.exception(f"对话 AI 任务 {rt.task_id} 异常")
+        error_str = str(e)
+        rt.error = error_str
+        rt.emit({"type": "error", "error": error_str})
+
+        if not full_response:
+            brief = error_str[:300] + '...' if len(error_str) > 300 else error_str
+            error_content = f"**⚠️ AI 服务错误**\n\n❌ {brief}"
+            try:
+                async with async_session_maker() as save_db:
+                    err_msg = Message(
+                        conversation_id=conversation_id,
+                        role=MessageRole.assistant,
+                        sender_name=model,
+                        content=error_content,
+                        message_type=MessageType.chat,
+                        model_used=model,
+                    )
+                    save_db.add(err_msg)
+                    await save_db.commit()
+                    rt.result_message_id = err_msg.id
+                    rt.emit({"type": "done", "message_id": err_msg.id})
+            except Exception:
+                rt.emit({"type": "done", "message_id": -1})
+
+        rt.status = "failed"
+        rt.completed_at = datetime.utcnow()
+        await _persist_task_final(rt, "failed", error_message=error_str)

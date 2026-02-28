@@ -136,37 +136,25 @@ def _mask_token(t: str) -> str:
 
 @system_router.post("/github-token")
 async def set_github_token(body: _GHTokenBody, db: AsyncSession = Depends(get_db)):
-    """设置 / 更新 GitHub Token（绑定到当前活跃工作目录）"""
-    from studio.backend.core.config import settings as _s
-    token = body.token.strip()
-    row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
-    if row:
-        row.github_token = token
-        _s.github_token = token
-        return {
-            "ok": True,
-            "masked_token": _mask_token(token),
-            "scope": "workspace",
-            "workspace_id": row.id,
-            "workspace_path": row.path,
-        }
-
-    # 无活跃目录时回退到进程内全局设置（临时）
-    _s.github_token = token
-    return {"ok": True, "masked_token": _mask_token(_s.github_token), "scope": "runtime"}
+    """设置 / 更新系统级 GitHub Token（持久化到 studio_config）"""
+    from studio.backend.services.config_service import set_github_token as _set
+    result = await _set(body.token.strip())
+    return result
 
 
 @system_router.delete("/github-token")
 async def clear_github_token(db: AsyncSession = Depends(get_db)):
-    """清除 GitHub Token（当前活跃工作目录）"""
-    from studio.backend.core.config import settings as _s
-    row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
-    if row:
-        row.github_token = ""
-        _s.github_token = ""
-        return {"ok": True, "scope": "workspace", "workspace_id": row.id, "workspace_path": row.path}
-    _s.github_token = ""
-    return {"ok": True, "scope": "runtime"}
+    """清除系统级 GitHub Token"""
+    from studio.backend.services.config_service import clear_github_token as _clear
+    result = await _clear()
+    return result
+
+
+@system_router.get("/github-token")
+async def get_github_token_status():
+    """获取系统级 GitHub Token 配置状态"""
+    from studio.backend.services.config_service import get_github_token_status as _get
+    return await _get()
 
 
 @system_router.post("/github-repo")

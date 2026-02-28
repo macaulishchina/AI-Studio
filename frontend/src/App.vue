@@ -18,7 +18,7 @@ import { darkTheme, zhCN, dateZhCN } from 'naive-ui'
 body {
   margin: 0;
   padding: 0;
-  background: #1a1a2e;
+  background: #1a1a1a;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 </style>

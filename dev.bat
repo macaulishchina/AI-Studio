@@ -63,6 +63,23 @@ if errorlevel 1 (
 )
 goto :eof
 
+:check_device_deps
+echo [Deps] 检查设备调试依赖...
+pip show sounddevice >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] sounddevice 未安装, 服务端音频采集不可用
+    echo        安装: pip install sounddevice numpy
+)
+pip show opencv-python-headless >nul 2>&1
+if errorlevel 1 (
+    pip show opencv-python >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] opencv 未安装, 服务端摄像头不可用
+        echo        安装: pip install opencv-python-headless
+    )
+)
+goto :eof
+
 :ensure_frontend_deps
 echo [Deps] 检查前端依赖...
 if not exist "%PROJECT_ROOT%frontend\node_modules" (
@@ -75,6 +92,7 @@ goto :eof
 
 :run_backend
 call :ensure_python_deps
+call :check_device_deps
 cd /d "%PROJECT_ROOT%"
 python -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "%PROJECT_ROOT%backend"
 goto :eof
@@ -88,6 +106,7 @@ goto :eof
 :run_all
 call :ensure_python_deps
 call :ensure_frontend_deps
+call :check_device_deps
 echo [INFO] 启动后端窗口...
 start "AI-Studio Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && set PYTHONPATH=%PYTHONPATH% && set STUDIO_DATA_PATH=%STUDIO_DATA_PATH% && set WORKSPACE_PATH=%WORKSPACE_PATH% && set STUDIO_ADMIN_USER=%STUDIO_ADMIN_USER% && set STUDIO_ADMIN_PASS=%STUDIO_ADMIN_PASS% && set STUDIO_SECRET_KEY=%STUDIO_SECRET_KEY% && python -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir %PROJECT_ROOT%backend"
 echo [INFO] 启动前端窗口...

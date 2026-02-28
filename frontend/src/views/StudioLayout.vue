@@ -11,11 +11,11 @@
       @collapse="collapsed = true"
       @expand="collapsed = false"
       :native-scrollbar="false"
-      style="background: #16213e"
+      style="background: #171717"
     >
       <div style="padding: 16px; text-align: center">
-        <n-text style="font-size: 20px; color: #e94560" strong>
-          {{ collapsed ? '🤖' : '🤖 AI设计院' }}
+        <n-text style="font-size: 20px; color: #7c6cff" strong>
+          {{ collapsed ? '🐕' : '🐕 Dogi' }}
         </n-text>
       </div>
 
@@ -31,15 +31,15 @@
 
       <div v-if="!collapsed" style="position: absolute; bottom: 16px; left: 16px; right: 16px">
         <n-text depth="3" style="font-size: 12px">
-          设计院 Studio v1.0
+          Dogi v2.0
         </n-text>
       </div>
     </n-layout-sider>
 
     <n-layout>
-      <n-layout-header bordered style="height: 56px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: #16213e">
+      <n-layout-header bordered style="height: 56px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: #171717">
         <n-breadcrumb>
-          <n-breadcrumb-item @click="$router.push('/')">设计院</n-breadcrumb-item>
+          <n-breadcrumb-item @click="$router.push('/')">Dogi</n-breadcrumb-item>
           <n-breadcrumb-item v-if="routeName">{{ routeName }}</n-breadcrumb-item>
         </n-breadcrumb>
 
@@ -92,7 +92,7 @@
       <n-layout-content
         content-style="padding: 24px"
         :native-scrollbar="false"
-        style="background: #0f3460"
+        style="background: #1a1a1a"
       >
         <router-view />
       </n-layout-content>
@@ -104,7 +104,7 @@
     <!-- 移动端顶栏 -->
     <n-layout-header bordered class="mobile-header">
       <div class="mobile-header-left">
-        <n-text style="font-size: 16px; color: #e94560; white-space: nowrap" strong>🤖 设计院</n-text>
+        <n-text style="font-size: 16px; color: #7c6cff; white-space: nowrap" strong>🐕 Dogi</n-text>
       </div>
       <div class="mobile-header-right">
         <n-tag v-if="authStore.user" :bordered="false" :type="authStore.isAdmin ? 'warning' : 'info'" size="small" round>
@@ -123,7 +123,7 @@
     <n-layout-content
       content-style="padding: 12px"
       :native-scrollbar="false"
-      style="background: #0f3460; flex: 1; overflow: auto"
+      style="background: #1a1a1a; flex: 1; overflow: auto"
       class="mobile-content"
     >
       <router-view />
@@ -153,6 +153,7 @@ import type { MenuOption } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { workspaceDirApi } from '@/api'
 import {
+  ChatbubblesOutline,
   HomeOutline,
   DocumentTextOutline,
   CameraOutline,
@@ -247,28 +248,31 @@ onUnmounted(() => {
 
 // ── 移动端底部 tab 定义 ──────────────────────────────────
 const mobileTabItems = [
+  { key: 'chat', label: '对话', icon: ChatbubblesOutline },
   { key: 'projects', label: '项目', icon: DocumentTextOutline },
-  { key: 'snapshots', label: '快照', icon: CameraOutline },
   { key: 'settings', label: '设置', icon: SettingsOutline },
 ]
 
 const activeKey = computed(() => {
   const path = route.path
-  if (path === '/' || path === '') return 'projects'
+  if (path === '/' || path === '' || path.startsWith('/c/')) return 'chat'
   if (path.includes('/projects/')) return 'projects'
   if (path.includes('/projects')) return 'projects'
   if (path.includes('/snapshots')) return 'snapshots'
   if (path.includes('/settings')) return 'settings'
-  return 'projects'
+  if (path.includes('/device-debug')) return 'device-debug'
+  return 'chat'
 })
 
 const routeName = computed(() => {
   const map: Record<string, string> = {
-    Dashboard: '项目',
+    ChatHome: '对话',
+    ChatView: '对话',
     ProjectList: '项目',
     ProjectDetail: '项目详情',
     Snapshots: '快照管理',
     Settings: '设置',
+    DeviceDebug: '设备调试',
   }
   return map[route.name as string] || ''
 })
@@ -278,16 +282,20 @@ function renderIcon(icon: any) {
 }
 
 const menuOptions: MenuOption[] = [
+  { label: '对话', key: 'chat', icon: renderIcon(ChatbubblesOutline) },
   { label: '项目', key: 'projects', icon: renderIcon(DocumentTextOutline) },
-  { label: '快照管理', key: 'snapshots', icon: renderIcon(CameraOutline) },
+  { label: '快照', key: 'snapshots', icon: renderIcon(CameraOutline) },
+  { label: '调试', key: 'device-debug', icon: renderIcon(PulseOutline) },
   { label: '设置', key: 'settings', icon: renderIcon(SettingsOutline) },
 ]
 
 // 持久化每个菜单区域最后访问的路径
 const lastPaths: Record<string, string> = {
-  projects: sessionStorage.getItem('nav_projects') || '/',
+  chat: sessionStorage.getItem('nav_chat') || '/',
+  projects: sessionStorage.getItem('nav_projects') || '/projects',
   snapshots: sessionStorage.getItem('nav_snapshots') || '/snapshots',
   settings: sessionStorage.getItem('nav_settings') || '/settings',
+  'device-debug': sessionStorage.getItem('nav_device-debug') || '/device-debug',
 }
 
 // 监听路由变化，记录当前菜单区域的路径
@@ -317,7 +325,7 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #16213e;
+  background: #171717;
   flex-shrink: 0;
 }
 .mobile-header-left {
@@ -343,7 +351,7 @@ function handleLogout() {
   align-items: center;
   justify-content: space-around;
   height: 56px;
-  background: #16213e;
+  background: #171717;
   border-top: 1px solid rgba(255,255,255,0.08);
   flex-shrink: 0;
   padding-bottom: env(safe-area-inset-bottom, 0);
@@ -365,7 +373,7 @@ function handleLogout() {
   opacity: 0.7;
 }
 .mobile-tab-active {
-  color: #e94560;
+  color: #7c6cff;
 }
 .mobile-tab-label {
   font-size: 10px;

@@ -322,4 +322,28 @@ export const tasksApi = {
     api.post(`/tasks/${taskId}/approve-command`, body),
 }
 
+// ==================== MCP 服务管理 ====================
+export const mcpApi = {
+  // 服务器 CRUD
+  listServers: () => api.get('/mcp/servers'),
+  createServer: (data: any) => api.post('/mcp/servers', data),
+  updateServer: (slug: string, data: any) => api.patch(`/mcp/servers/${slug}`, data),
+  deleteServer: (slug: string) => api.delete(`/mcp/servers/${slug}`),
+  // 连接管理
+  connect: (slug: string) => api.post(`/mcp/servers/${slug}/connect`, null, { timeout: 30000 }),
+  disconnect: (slug: string) => api.post(`/mcp/servers/${slug}/disconnect`),
+  // 工具列表
+  getTools: (slug: string) => api.get(`/mcp/servers/${slug}/tools`),
+  // 权限
+  getPermissions: (slug: string) => api.get(`/mcp/servers/${slug}/permissions`),
+  // 密钥验证
+  validateSecrets: (slug: string) => api.post(`/mcp/servers/${slug}/validate-secrets`),
+  // 全局状态
+  status: () => api.get('/mcp/status'),
+  health: () => api.get('/mcp/health'),
+  // 审计日志
+  auditLog: (params?: any) => api.get('/mcp/audit-log', { params }),
+  auditLogStats: () => api.get('/mcp/audit-log/stats'),
+}
+
 export default api

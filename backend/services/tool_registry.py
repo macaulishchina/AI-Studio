@@ -347,6 +347,7 @@ def get_tool_definitions(permissions: Optional[Set[str]] = None) -> list:
     获取当前可用的工具定义列表 (根据权限过滤)
 
     优先使用 DB 缓存, 回退到硬编码 TOOL_DEFINITIONS
+    同时包含已启用的 MCP Server 提供的工具
 
     Args:
         permissions: 允许的权限集合，None 表示使用默认权限 (全部开启)
@@ -366,6 +367,14 @@ def get_tool_definitions(permissions: Optional[Set[str]] = None) -> list:
         required_perm = perm_map.get(name)
         if required_perm and required_perm.issubset(perms):
             tools.append(tool_def)
+
+    # 追加 MCP 工具 (如果有)
+    try:
+        from studio.backend.services.mcp.execution_adapter import MCPExecutionAdapter
+        mcp_tools = MCPExecutionAdapter.get_mcp_tool_definitions(perms)
+        tools.extend(mcp_tools)
+    except Exception as e:
+        logger.debug(f"MCP 工具加载跳过: {e}")
 
     return tools
 
@@ -441,21 +450,39 @@ async def execute_tool(
     workspace: str,
     permissions: Optional[Set[str]] = None,
     command_approval_fn: CommandApprovalCallback = None,
+    project_id: Optional[int] = None,
+    workspace_dir: Optional[str] = None,
 ) -> str:
     """
     执行指定工具并返回结果文本
 
     Args:
-        name: 工具名称
+        name: 工具名称 (支持 mcp_{slug}__{tool} 格式的 MCP 工具)
         arguments: 工具参数
         workspace: 工作区根路径
         permissions: 允许的权限集合
         command_approval_fn: 异步回调, 用于请求用户批准写命令
                             签名: async (command: str, tool_call_id: str) -> {"approved": bool, "scope": str}
+        project_id: 项目 ID (MCP 调用时用于凭据解析和审计)
+        workspace_dir: 工作目录路径 (MCP 调用时用于凭据解析)
 
     Returns:
         工具执行结果 (纯文本)
     """
+    # MCP 工具路由: 以 mcp_ 前缀判断
+    from studio.backend.services.mcp.tool_adapter import is_mcp_tool
+    if is_mcp_tool(name):
+        from studio.backend.services.mcp.execution_adapter import MCPExecutionAdapter
+        return await MCPExecutionAdapter.execute(
+            tool_name=name,
+            arguments=arguments,
+            workspace=workspace,
+            permissions=permissions,
+            project_id=project_id,
+            workspace_dir=workspace_dir,
+            command_approval_fn=command_approval_fn,
+        )
+
     perms = permissions or DEFAULT_PERMISSIONS
 
     # 权限检查

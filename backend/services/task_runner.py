@@ -801,9 +801,14 @@ async def _execute_discussion(
         async def _command_approval_fn(command: str, tool_call_id: str) -> dict:
             return await rt.request_command_approval(command, tool_call_id)
 
+        # 获取项目的工作目录路径 (MCP 凭据解析用)
+        _project_workspace_dir = project2.workspace_dir if project2 else None
+
         async def _tool_executor(name: str, arguments: dict) -> str:
             return await execute_tool(name, arguments, workspace_path, tool_permissions,
-                                      command_approval_fn=_command_approval_fn)
+                                      command_approval_fn=_command_approval_fn,
+                                      project_id=project_id,
+                                      workspace_dir=_project_workspace_dir)
 
         # ---- 发送上下文信息 ----
         context_summary = build_usage_summary(

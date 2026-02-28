@@ -439,6 +439,28 @@ async def list_permissions(db: AsyncSession = Depends(get_db)):
         else:
             ordered.append(child)
 
+    # 5) 追加 MCP 服务级权限 (动态从 mcp_servers 表读取已启用的服务)
+    try:
+        from studio.backend.models import MCPServer as MCPServerModel
+        mcp_result = await db.execute(
+            select(MCPServerModel).where(MCPServerModel.enabled.is_(True)).order_by(MCPServerModel.sort_order)
+        )
+        mcp_servers = mcp_result.scalars().all()
+        for ms in mcp_servers:
+            perm_key = f"mcp_{ms.slug}"
+            if perm_key not in seen_keys:
+                seen_keys.add(perm_key)
+                ordered.append(PermissionInfo(
+                    key=perm_key,
+                    label=f"MCP: {ms.name}",
+                    icon=ms.icon or "🔌",
+                    tip=f"允许 AI 通过 MCP 协议调用 {ms.name} 提供的工具",
+                    is_meta=False,
+                    parent=None,
+                ))
+    except Exception:
+        pass  # MCP 表可能不存在 (首次启动)
+
     return ordered
 
 

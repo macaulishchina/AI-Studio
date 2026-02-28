@@ -598,3 +598,61 @@ class AiTask(Base):
     completed_at = Column(DateTime, nullable=True)
 
     project = relationship("Project")
+
+
+# ======================== MCP (Model Context Protocol) ========================
+
+class MCPServer(Base):
+    """
+    MCP Server 配置 — 管理外部 MCP 服务接入
+
+    每个 MCP Server 对应一个外部工具服务 (如 GitHub MCP Server),
+    通过 stdio/sse/streamable_http 协议通信。
+    """
+    __tablename__ = "mcp_servers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    slug = Column(String(50), nullable=False, unique=True)        # 唯一标识 (如 "github")
+    name = Column(String(100), nullable=False)                    # 显示名 (如 "GitHub MCP Server")
+    description = Column(Text, default="")
+    icon = Column(String(10), default="🔌")
+
+    # 传输配置
+    transport = Column(String(20), nullable=False, default="stdio")  # stdio | sse | streamable_http
+    command = Column(String(500), default="")                     # stdio: 启动命令
+    args = Column(JSON, default=list)                             # stdio: 命令参数
+    env_template = Column(JSON, default=dict)                     # 环境变量模板 (支持 {github_token} 占位符)
+    url = Column(String(500), default="")                         # sse/http: 远程 URL
+
+    # 权限映射: MCP tool_name → Studio permission_key (JSON object)
+    permission_map = Column(JSON, default=dict)
+
+    enabled = Column(Boolean, default=True)
+    is_builtin = Column(Boolean, default=False)                   # 内置服务不可删除
+    sort_order = Column(Integer, default=0)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MCPAuditLog(Base):
+    """
+    MCP 调用审计日志 — 记录每次 MCP 工具调用
+
+    用于安全审计、调用统计、故障排查
+    """
+    __tablename__ = "mcp_audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    server_slug = Column(String(50), nullable=False, index=True)  # MCP Server 标识
+    tool_name = Column(String(100), nullable=False)               # MCP 工具名
+    arguments = Column(JSON, default=dict)                        # 调用参数 (脱敏)
+    result_preview = Column(Text, default="")                     # 结果预览 (截断)
+    duration_ms = Column(Integer, default=0)                      # 耗时 (毫秒)
+    success = Column(Boolean, default=True)                       # 是否成功
+    error_message = Column(Text, default="")                      # 错误信息
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    project = relationship("Project", foreign_keys=[project_id])

@@ -30,6 +30,7 @@ from studio.backend.api.ws import router as ws_router
 from studio.backend.api.users import router as users_router
 from studio.backend.api.command_auth import router as command_auth_router
 from studio.backend.api.workspace_dirs import router as workspace_dirs_router
+from studio.backend.api.mcp import router as mcp_router, seed_mcp_servers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -92,7 +93,17 @@ async def lifespan(app: FastAPI):
     # 同步活跃工作目录: DB 中的活跃目录 → settings.workspace_path
     await _sync_active_workspace()
 
+    # MCP 框架初始化
+    await seed_mcp_servers()
+    from studio.backend.services.mcp.registry import MCPServerRegistry
+    await MCPServerRegistry.get_instance().load_from_db()
+
     yield
+
+    # 关闭 MCP 连接
+    from studio.backend.services.mcp.client_manager import MCPClientManager
+    await MCPClientManager.get_instance().disconnect_all()
+
     logger.info("🤖 设计院关闭")
 
 
@@ -311,6 +322,54 @@ async def _auto_migrate():
                 pass
             logger.info("✅ workspace_dirs 表就绪")
 
+            # ── MCP 相关表 ──────────────────────────────────────
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS mcp_servers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slug VARCHAR(50) NOT NULL UNIQUE,
+                    name VARCHAR(100) NOT NULL,
+                    description TEXT DEFAULT '',
+                    icon VARCHAR(10) DEFAULT '🔌',
+                    transport VARCHAR(20) NOT NULL DEFAULT 'stdio',
+                    command VARCHAR(500) DEFAULT '',
+                    args JSON DEFAULT '[]',
+                    env_template JSON DEFAULT '{}',
+                    url VARCHAR(500) DEFAULT '',
+                    permission_map JSON DEFAULT '{}',
+                    enabled BOOLEAN DEFAULT 1,
+                    is_builtin BOOLEAN DEFAULT 0,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """))
+            logger.info("✅ mcp_servers 表就绪")
+
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS mcp_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_slug VARCHAR(50) NOT NULL,
+                    tool_name VARCHAR(100) NOT NULL,
+                    arguments JSON DEFAULT '{}',
+                    result_preview TEXT DEFAULT '',
+                    duration_ms INTEGER DEFAULT 0,
+                    success BOOLEAN DEFAULT 1,
+                    error_message TEXT DEFAULT '',
+                    project_id INTEGER REFERENCES projects(id),
+                    created_at DATETIME
+                )
+            """))
+            # 为审计日志创建索引
+            await db.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_mcp_audit_log_server_slug
+                ON mcp_audit_log(server_slug)
+            """))
+            await db.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_mcp_audit_log_created_at
+                ON mcp_audit_log(created_at)
+            """))
+            logger.info("✅ mcp_audit_log 表就绪")
+
             await db.commit()
     except Exception as e:
         logger.warning(f"⚠️ 自动迁移跳过: {e}")
@@ -512,6 +571,7 @@ app.include_router(ws_router)
 app.include_router(users_router)
 app.include_router(command_auth_router)
 app.include_router(workspace_dirs_router)
+app.include_router(mcp_router)
 
 
 @app.get("/studio-api/health")

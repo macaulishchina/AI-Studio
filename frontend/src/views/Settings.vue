@@ -49,6 +49,9 @@
       <n-tab-pane name="system" tab="🖥️ 系统">
         <SystemSettings />
       </n-tab-pane>
+      <n-tab-pane name="mcp" tab="🔌 MCP">
+        <MCPSettings />
+      </n-tab-pane>
       <n-tab-pane v-if="authStore.isAdmin" name="users" tab="👥 用户">
         <UserManagement />
       </n-tab-pane>
@@ -67,6 +70,7 @@ import RoleSettings from './settings/RoleSettings.vue'
 import SkillSettings from './settings/SkillSettings.vue'
 import ToolSettings from './settings/ToolSettings.vue'
 import WorkflowSettings from './settings/WorkflowSettings.vue'
+import MCPSettings from './settings/MCPSettings.vue'
 import UserManagement from './settings/UserManagement.vue'
 
 const props = defineProps<{ tab?: string }>()
@@ -78,7 +82,7 @@ function onResize() { windowWidth.value = window.innerWidth }
 onMounted(() => {
   window.addEventListener('resize', onResize)
   // 如果 URL 中带了 tab 参数，优先使用
-  if (props.tab && ['ai', 'capabilities', 'system', 'users'].includes(props.tab)) {
+  if (props.tab && ['ai', 'capabilities', 'system', 'mcp', 'users'].includes(props.tab)) {
     activeTab.value = props.tab
   }
 })

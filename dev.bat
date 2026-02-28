@@ -1,22 +1,22 @@
 @echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
-REM ============================================================
-REM  AI-Studio — Windows 一键启动开发环境
-REM  同时启动后端 (FastAPI) 和前端 (Vite) 开发服务器
-REM ============================================================
-
-echo.
-echo ============================================================
-echo   AI-Studio 开发环境启动
-echo ============================================================
-echo.
-
+set "TARGET=%~1"
 set "PROJECT_ROOT=%~dp0"
+
+if "%TARGET%"=="" goto :help
+if /i "%TARGET%"=="help" goto :help
+if /i "%TARGET%"=="-h" goto :help
+if /i "%TARGET%"=="--help" goto :help
+
+if /i not "%TARGET%"=="backend" if /i not "%TARGET%"=="frontend" if /i not "%TARGET%"=="all" (
+    echo [ERROR] 未知参数: %TARGET%
+    echo.
+    goto :help
+)
 
 cd /d "%PROJECT_ROOT%"
 
-REM ── 加载 .env 文件 ──
 if exist "%PROJECT_ROOT%.env" (
     for /f "usebackq tokens=1,* delims==" %%A in ("%PROJECT_ROOT%.env") do (
         set "_LINE=%%A"
@@ -26,7 +26,6 @@ if exist "%PROJECT_ROOT%.env" (
     )
 )
 
-REM ── 环境变量 (未在 .env 中设置时使用默认值) ──
 set "PYTHONPATH=%PROJECT_ROOT:~0,-1%"
 if not defined STUDIO_DATA_PATH set "STUDIO_DATA_PATH=%PROJECT_ROOT%dev-data"
 if not defined WORKSPACE_PATH set "WORKSPACE_PATH=%PROJECT_ROOT:~0,-1%"
@@ -34,56 +33,84 @@ if not defined STUDIO_ADMIN_USER set "STUDIO_ADMIN_USER=admin"
 if not defined STUDIO_ADMIN_PASS set "STUDIO_ADMIN_PASS=admin123"
 if not defined STUDIO_SECRET_KEY set "STUDIO_SECRET_KEY=dev-secret-key-not-for-production"
 
-REM ── 创建数据目录 ──
 if not exist "%STUDIO_DATA_PATH%" mkdir "%STUDIO_DATA_PATH%"
 if not exist "%STUDIO_DATA_PATH%\plans" mkdir "%STUDIO_DATA_PATH%\plans"
 if not exist "%STUDIO_DATA_PATH%\db-backups" mkdir "%STUDIO_DATA_PATH%\db-backups"
 if not exist "%STUDIO_DATA_PATH%\uploads" mkdir "%STUDIO_DATA_PATH%\uploads"
 
-echo   项目目录:   %PROJECT_ROOT:~0,-1%
-echo   PYTHONPATH:  %PYTHONPATH%
-echo   数据目录:    %STUDIO_DATA_PATH%
-echo   工作区:      %WORKSPACE_PATH%
-echo   管理员:      %STUDIO_ADMIN_USER% / %STUDIO_ADMIN_PASS%
 echo.
-echo   后端地址:    http://localhost:8002
-echo   前端地址:    http://localhost:5174/studio/
-echo   API 文档:    http://localhost:8002/studio-api/docs
+echo ============================================================
+echo   AI-Studio 开发环境启动
+echo ============================================================
+echo   目标:        %TARGET%
+echo   项目目录:    %PROJECT_ROOT:~0,-1%
+echo   数据目录:    %STUDIO_DATA_PATH%
+echo   管理员:      %STUDIO_ADMIN_USER% / %STUDIO_ADMIN_PASS%
 echo ============================================================
 echo.
 
-REM ── 检查 Python 依赖 ──
-echo [1/3] 检查 Python 依赖...
+if /i "%TARGET%"=="backend" goto :run_backend
+if /i "%TARGET%"=="frontend" goto :run_frontend
+if /i "%TARGET%"=="all" goto :run_all
+goto :eof
+
+:ensure_python_deps
+echo [Deps] 检查 Python 依赖...
 pip show fastapi >nul 2>&1
 if errorlevel 1 (
     echo [INFO] 安装 Python 依赖...
     pip install -r "%PROJECT_ROOT%requirements.txt"
 )
+goto :eof
 
-REM ── 检查前端依赖 ──
-echo [2/3] 检查前端依赖...
+:ensure_frontend_deps
+echo [Deps] 检查前端依赖...
 if not exist "%PROJECT_ROOT%frontend\node_modules" (
     echo [INFO] 安装前端依赖...
     cd /d "%PROJECT_ROOT%frontend"
     call npm install
     cd /d "%PROJECT_ROOT%"
 )
+goto :eof
 
-REM ── 启动后端 (新窗口, 子进程自动继承当前环境变量) ──
-echo [3/3] 启动服务...
-echo.
-echo   正在启动后端 (FastAPI)...
-start "AI-Studio Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && python -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir %PROJECT_ROOT%backend"
+:run_backend
+call :ensure_python_deps
+cd /d "%PROJECT_ROOT%"
+python -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "%PROJECT_ROOT%backend"
+goto :eof
 
-REM ── 启动前端 (新窗口) ──
-echo   正在启动前端 (Vite)...
-start "AI-Studio Frontend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT%frontend && npm run dev"
+:run_frontend
+call :ensure_frontend_deps
+cd /d "%PROJECT_ROOT%frontend"
+npm run dev -- --host 0.0.0.0
+goto :eof
 
+:run_all
+call :ensure_python_deps
+call :ensure_frontend_deps
+echo [INFO] 启动后端窗口...
+start "AI-Studio Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && set PYTHONPATH=%PYTHONPATH% && set STUDIO_DATA_PATH=%STUDIO_DATA_PATH% && set WORKSPACE_PATH=%WORKSPACE_PATH% && set STUDIO_ADMIN_USER=%STUDIO_ADMIN_USER% && set STUDIO_ADMIN_PASS=%STUDIO_ADMIN_PASS% && set STUDIO_SECRET_KEY=%STUDIO_SECRET_KEY% && python -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir %PROJECT_ROOT%backend"
+echo [INFO] 启动前端窗口...
+start "AI-Studio Frontend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT%frontend && npm run dev -- --host 0.0.0.0"
 echo.
-echo [OK] 开发环境已启动!
-echo      后端窗口: "AI-Studio Backend"
-echo      前端窗口: "AI-Studio Frontend"
-echo      访问地址: http://localhost:5174/studio/
+echo [OK] 已启动前后端
+echo      前端: http://localhost:5174/studio/
+echo      后端: http://localhost:8002/studio-api/docs
 echo.
-echo 按任意键关闭此窗口...
-pause >nul
+goto :eof
+
+:help
+echo AI-Studio 开发脚本 ^(Windows^)
+echo.
+echo 用法:
+echo   dev.bat ^<backend^|frontend^|all^>
+echo.
+echo 参数:
+echo   backend   启动后端 ^(FastAPI^)
+echo   frontend  启动前端 ^(Vite^)
+echo   all       同时启动前端和后端 ^(新窗口^)
+echo.
+echo 示例:
+echo   dev.bat backend
+echo   dev.bat frontend
+echo   dev.bat all

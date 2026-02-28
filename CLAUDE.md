@@ -250,13 +250,13 @@ Docker 中通过 `COPY . ./studio/` + `ENV PYTHONPATH=/app` 实现。
 
 ```bash
 # 开发模式启动 (热重载)
-cd <project-parent-dir>
-set PYTHONPATH=.
-set STUDIO_DATA_PATH=./dev-data
-uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload
+cd <project-dir>
 
-# 或使用开发脚本
-python dev-start.py
+# Linux/macOS
+./dev.sh backend
+
+# Windows
+dev.bat backend
 ```
 
 ### 前端 (Vite)
@@ -272,7 +272,15 @@ npm run build      # 生产构建
 
 ```bash
 docker build -t ai-studio .
-docker run -p 8002:8002 -v studio-data:/data ai-studio
+docker run -p 8002:8002 \
+  -v studio-data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  ai-studio
+
+# 或使用 docker compose
+export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+docker compose up -d --build
 ```
 
 ## 数据模型关系

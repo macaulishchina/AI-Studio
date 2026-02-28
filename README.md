@@ -33,16 +33,13 @@ AI-Studio 提供了从需求讨论、方案设计、代码实施到部署上线�
 git clone <repo-url> AI-Studio
 cd AI-Studio
 
-# 方式 A: 一键启动 (同时启动前后端)
+# 无参数显示帮助
 dev.bat
 
-# 方式 B: 分别启动
-dev-backend.bat   # 终端 1: 后端
-dev-frontend.bat  # 终端 2: 前端
-
-# 方式 C: Python 脚本 (仅后端)
-pip install -r requirements.txt
-python dev-start.py
+# 按目标启动
+dev.bat backend
+dev.bat frontend
+dev.bat all
 ```
 
 #### Linux / macOS
@@ -55,8 +52,17 @@ cd AI-Studio
 # 添加执行权限
 chmod +x dev.sh
 
-# 一键启动
+# 无参数显示帮助
 ./dev.sh
+
+# 按目标启动
+./dev.sh backend
+./dev.sh frontend
+./dev.sh all
+
+# Linux 后台运行 (tmux)
+./dev.sh all --tmux
+# 默认同一 window 左右分屏，同时显示后端和前端日志
 ```
 
 启动后访问:
@@ -101,11 +107,13 @@ npm run dev
 # 构建镜像
 docker build -t ai-studio .
 
-# 运行 (数据持久化)
+# 运行 (数据持久化 + 可访问宿主机 Docker)
 docker run -d \
   --name ai-studio \
   -p 8002:8002 \
   -v ai-studio-data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -e STUDIO_ADMIN_PASS=your-secure-password \
   -e GITHUB_TOKEN=ghp_xxxx \
   ai-studio
@@ -114,7 +122,59 @@ docker run -d \
 docker logs ai-studio
 ```
 
+如果不需要在 Studio 中查看/操作宿主机其他容器，可去掉 `docker.sock` 挂载与 `--group-add`。
+
+也可使用 `docker compose`（推荐，已提供 `docker-compose.yml`）:
+
+```bash
+# 让 compose 中 group_add 与 docker.sock 用户组一致
+export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+
+# 启动
+docker compose up -d --build
+
+# 查看日志
+docker compose logs -f ai-studio
+
+# 停止
+docker compose down
+```
+
 > ⚠️ Docker 模式仅启动后端 API。生产环境需要单独构建前端 (`npm run build`) 并通过 Nginx 等反向代理提供静态文件服务。
+
+### 方式三: 本地部署脚本 (非 Docker)
+
+适用于已有 Python/Node 环境、希望直接在本机部署运行。
+
+```bash
+# 1) 准备环境变量
+cp .env.example .env
+
+# 2) Linux/macOS
+chmod +x deploy.sh
+./deploy.sh
+./deploy.sh backend
+./deploy.sh frontend
+./deploy.sh all
+
+# Linux 后台 tmux 运行
+./deploy.sh all --tmux
+
+# 3) Windows
+deploy.bat
+deploy.bat backend
+deploy.bat frontend
+deploy.bat all
+```
+
+默认地址:
+- 前端: http://localhost:4174/studio/
+- 后端: http://localhost:8002/studio-api/docs
+
+可在 `.env` 中调整端口:
+- `DEPLOY_BACKEND_HOST` / `DEPLOY_BACKEND_PORT`
+- `DEPLOY_FRONTEND_HOST` / `DEPLOY_FRONTEND_PORT`
+- `DEPLOY_TMUX_SESSION` (仅 Linux)
 
 ## ⚙️ 配置
 
@@ -165,11 +225,10 @@ AI-Studio/
 │   │   ├── stores/       # Pinia 状态仓库
 │   │   └── composables/  # Vue 组合函数
 │   └── vite.config.ts    # Vite 配置 (含 API 代理)
-├── dev.bat               # Windows 一键启动
-├── dev.sh                # Linux/macOS 一键启动
-├── dev-backend.bat       # 仅启动后端
-├── dev-frontend.bat      # 仅启动前端
-├── dev-start.py          # Python 后端启动脚本
+├── dev.bat               # Windows 开发启动脚本 (backend/frontend/all)
+├── dev.sh                # Linux/macOS 开发启动脚本 (backend/frontend/all, 支持 --tmux)
+├── deploy.bat            # Windows 本地部署脚本 (backend/frontend/all)
+├── deploy.sh             # Linux/macOS 本地部署脚本 (backend/frontend/all, 支持 --tmux)
 ├── Dockerfile            # Docker 构建
 ├── requirements.txt      # Python 依赖
 └── CLAUDE.md             # AI 开发助手指南
@@ -217,8 +276,7 @@ from studio.backend.models import Project
 ### Q: `ModuleNotFoundError: No module named 'studio'`
 
 A: PYTHONPATH 未正确设置。使用开发脚本 (`dev.bat` / `dev.sh`) 会自动处理。手动启动时确保:
-- PYTHONPATH 指向项目的**父目录**
-- 父目录下有 `studio` 文件夹 (或链接) 指向本项目
+- PYTHONPATH 指向项目根目录
 
 ### Q: 前端 API 请求报 404
 

@@ -1,0 +1,23 @@
+services:
+  ai-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-studio
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    environment:
+      STUDIO_DATA_PATH: /data
+      WORKSPACE_PATH: /app/studio
+      PYTHONPATH: /app
+    volumes:
+      - ai-studio-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-0}"
+    restart: unless-stopped
+
+volumes:
+  ai-studio-data:

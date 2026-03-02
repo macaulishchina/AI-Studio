@@ -30,6 +30,13 @@
 
     <!-- 主区域 -->
     <div class="main-area">
+      <!-- 侧边栏折叠时的全局恢复按钮 (仅在 Welcome 页显示绝对定位按钮，Chat 页集成在 Header 中) -->
+      <div v-if="sidebarCollapsed && !activeConversationId" class="sidebar-toggle-float">
+        <n-button quaternary circle @click="sidebarCollapsed = false">
+          <template #icon><n-icon :component="MenuOutline" /></template>
+        </n-button>
+      </div>
+
       <!-- 无对话选中: 欢迎页 -->
       <div v-if="!activeConversationId" class="welcome">
         <div class="welcome-logo">🐕</div>
@@ -74,7 +81,18 @@
       <!-- 有对话选中: 聊天视图 -->
       <div v-else class="chat-view">
         <div class="chat-header">
-          <h3>{{ activeConversation?.title || '新对话' }}</h3>
+          <div class="header-left" style="display: flex; align-items: center; gap: 8px;">
+            <n-button
+              v-if="sidebarCollapsed"
+              quaternary
+              circle
+              size="small"
+              @click="sidebarCollapsed = false"
+            >
+              <template #icon><n-icon :component="MenuOutline" /></template>
+            </n-button>
+            <h3>{{ activeConversation?.title || '新对话' }}</h3>
+          </div>
           <div class="chat-header-actions">
             <n-select
               v-model:value="selectedModel"
@@ -184,7 +202,7 @@ const {
   modelOptions,
   renderModelLabel,
   loadModels,
-} = useModelSelection('gpt-4o', { useGlobalDefault: true })
+} = useModelSelection('gpt-4o', { useGlobalDefault: true, applySourceFilter: false })
 
 // ========== State ==========
 const route = useRoute()
@@ -425,7 +443,12 @@ function renderMarkdown(text: string): string {
 
 function formatTime(dateStr: string): string {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
+  // 后端常返回 UTC 时间但不带时区后缀，前端需按 UTC 解析避免出现“新建即 8 小时前”
+  const normalized = (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(dateStr))
+    ? `${dateStr}Z`
+    : dateStr
+  const d = new Date(normalized)
+  if (Number.isNaN(d.getTime())) return ''
   const now = new Date()
   const diff = now.getTime() - d.getTime()
   if (diff < 60000) return '刚刚'
@@ -541,6 +564,13 @@ watch(activeConversationId, async (id) => {
   min-width: 0;
   position: relative;
   background-image: radial-gradient(circle at 50% 0%, #1e1e24 0%, #101014 60%);
+}
+
+.sidebar-toggle-float {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
 }
 
 /* ── Welcome ── */

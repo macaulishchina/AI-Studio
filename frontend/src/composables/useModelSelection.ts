@@ -8,7 +8,7 @@ import { useStudioConfigStore } from '@/stores/studioConfig'
 import { getProviderIcon } from '@/utils/providerIcons'
 import { formatTokens } from './useChatUtils'
 
-export function useModelSelection(initialModel: string, options?: { useGlobalDefault?: boolean }) {
+export function useModelSelection(initialModel: string, options?: { useGlobalDefault?: boolean; applySourceFilter?: boolean }) {
   const message = useMessage()
   const studioConfig = useStudioConfigStore()
 
@@ -76,21 +76,20 @@ export function useModelSelection(initialModel: string, options?: { useGlobalDef
   // 模型选项 (分组)
   const modelOptions = computed(() => {
     const byCategory = models.value.filter(m => m.category === 'discussion' || m.category === 'both')
-    const source = modelSourceFilter.value === 'custom' ? 'all' : modelSourceFilter.value
+    const basePool = chatModelAllowlist.value.length > 0
+      ? byCategory.filter(m => chatModelAllowlist.value.includes(m.id))
+      : byCategory.filter(m => studioConfig.isModelVisible(m))
+
+    const source = options?.applySourceFilter === false
+      ? 'all'
+      : (modelSourceFilter.value === 'custom' ? 'all' : modelSourceFilter.value)
     const sourceFiltered = source === 'all'
-      ? byCategory
+      ? basePool
       : source === 'copilot'
-        ? byCategory.filter(m => m.provider_slug === 'copilot' || m.api_backend === 'copilot')
+        ? basePool.filter(m => m.provider_slug === 'copilot' || m.api_backend === 'copilot')
         : source === 'github'
-            ? byCategory.filter(m => m.provider_slug === 'github' || (!m.provider_slug && m.api_backend === 'models'))
-            : byCategory.filter(m => m.provider_slug === source)
-
-    const filtered = sourceFiltered.filter(m => studioConfig.isModelVisible(m))
-
-    // 服务端白名单过滤 (chatModelAllowlist 非空时生效)
-    const allowlisted = chatModelAllowlist.value.length > 0
-      ? filtered.filter(m => chatModelAllowlist.value.includes(m.id))
-      : filtered
+            ? basePool.filter(m => m.provider_slug === 'github' || (!m.provider_slug && m.api_backend === 'models'))
+            : basePool.filter(m => m.provider_slug === source)
 
     const mapOpt = (m: any) => ({
       label: m.name, value: m.id,
@@ -107,7 +106,7 @@ export function useModelSelection(initialModel: string, options?: { useGlobalDef
 
     const groups: Array<{ key: string; label: string; slug: string; items: any[] }> = []
     const groupMap: Record<string, typeof groups[0]> = {}
-    for (const m of allowlisted) {
+    for (const m of sourceFiltered) {
       const family = m.model_family || m.publisher || m.provider_slug || 'Other'
       const slug = m.provider_slug || (m.api_backend === 'copilot' ? 'copilot' : 'github')
       const gKey = slug + ':' + family

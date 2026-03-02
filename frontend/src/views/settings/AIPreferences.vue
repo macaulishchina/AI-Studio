@@ -71,7 +71,7 @@
         </n-space>
       </template>
       <template #header-extra>
-        <n-button size="tiny" type="primary" ghost :loading="savingModelSettings" @click="saveModelSettings">
+        <n-button size="tiny" type="primary" ghost :loading="savingChatSettings" @click="saveChatSettings">
           💾 保存
         </n-button>
       </template>
@@ -132,7 +132,7 @@
         <n-space :size="6">
           <n-tag v-if="sttConfigured" size="small" type="success" :bordered="false">已配置</n-tag>
           <n-tag v-else size="small" type="warning" :bordered="false">未配置</n-tag>
-          <n-button size="tiny" type="primary" ghost :loading="savingModelSettings" @click="saveModelSettings">
+          <n-button size="tiny" type="primary" ghost :loading="savingSttSettings" @click="saveSttSettings">
             💾 保存
           </n-button>
         </n-space>
@@ -259,7 +259,8 @@ const sttApiKey = ref('')
 const sttApiKeyConfigured = ref(false)
 const sttDefaultModel = ref<string | null>(null)
 const sttAllowlist = ref<string[]>([])
-const savingModelSettings = ref(false)
+const savingChatSettings = ref(false)
+const savingSttSettings = ref(false)
 
 // ── 模型列表 ──
 const allModels = ref<any[]>([])
@@ -316,17 +317,15 @@ function filterBySource(models: any[]) {
 // ── 聊天模型选项 (用于白名单多选：按来源过滤后的模型分组) ──
 const allChatModelOptions = computed(() => {
   const byCategory = allModels.value.filter(m => m.category === 'discussion' || m.category === 'both')
-  const visible = byCategory.filter(m => studioConfig.isModelVisible(m))
-  return buildGroupedOptions(filterBySource(visible))
+  return buildGroupedOptions(filterBySource(byCategory))
 })
 
 // ── 聊天默认模型选项 (从白名单中选择；白名单空则从全部中选) ──
 const chatDefaultOptions = computed(() => {
   const byCategory = allModels.value.filter(m => m.category === 'discussion' || m.category === 'both')
-  const visible = byCategory.filter(m => studioConfig.isModelVisible(m))
   const pool = chatAllowlist.value.length > 0
-    ? visible.filter(m => chatAllowlist.value.includes(m.id))
-    : visible
+    ? byCategory.filter(m => chatAllowlist.value.includes(m.id))
+    : byCategory
   return buildGroupedOptions(pool)
 })
 
@@ -479,22 +478,35 @@ onMounted(async () => {
   }
 })
 
-async function saveModelSettings() {
-  savingModelSettings.value = true
+async function saveChatSettings() {
+  savingChatSettings.value = true
   try {
     const updates: Record<string, any> = {
       chat_default_model: chatDefaultModel.value || '',
       chat_model_allowlist: chatAllowlist.value,
+    }
+    await systemApi.setModelSettings(updates)
+    message.success('聊天模型设置已保存')
+  } catch (e: any) {
+    message.error('保存失败: ' + (e?.response?.data?.detail || e.message))
+  } finally {
+    savingChatSettings.value = false
+  }
+}
+
+async function saveSttSettings() {
+  savingSttSettings.value = true
+  try {
+    const updates: Record<string, any> = {
       stt_api_base: sttApiBase.value.trim(),
       stt_default_model: sttDefaultModel.value || '',
       stt_model_allowlist: sttAllowlist.value,
     }
-    // 仅在用户主动输入了新 key 时才更新 (避免覆盖为空)
     if (sttApiKey.value) {
       updates.stt_api_key = sttApiKey.value
     }
     await systemApi.setModelSettings(updates)
-    message.success('模型设置已保存')
+    message.success('STT 设置已保存')
     sttApiKey.value = ''
     if (updates.stt_api_key || sttApiBase.value) {
       sttApiKeyConfigured.value = true
@@ -502,7 +514,7 @@ async function saveModelSettings() {
   } catch (e: any) {
     message.error('保存失败: ' + (e?.response?.data?.detail || e.message))
   } finally {
-    savingModelSettings.value = false
+    savingSttSettings.value = false
   }
 }
 </script>

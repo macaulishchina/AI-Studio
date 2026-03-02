@@ -70,9 +70,9 @@ async def execute_tool(
         工具执行结果 (纯文本)
     """
     # MCP 工具路由
-    from studio.backend.services.mcp.tool_adapter import is_mcp_tool
+    from backend.services.mcp.tool_adapter import is_mcp_tool
     if is_mcp_tool(name):
-        from studio.backend.services.mcp.execution_adapter import MCPExecutionAdapter
+        from backend.services.mcp.execution_adapter import MCPExecutionAdapter
         return await MCPExecutionAdapter.execute(
             tool_name=name,
             arguments=arguments,

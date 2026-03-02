@@ -11,9 +11,9 @@ from typing import Optional, Callable, Awaitable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings
-from studio.backend.models import Deployment, DeployStatus, DeployType, Project, ProjectStatus
-from studio.backend.services import snapshot_service
+from backend.core.config import settings
+from backend.models import Deployment, DeployStatus, DeployType, Project, ProjectStatus
+from backend.services import snapshot_service
 
 logger = logging.getLogger(__name__)
 

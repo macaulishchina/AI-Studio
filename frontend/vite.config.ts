@@ -16,10 +16,12 @@ export default defineConfig({
       '/studio-api': {
         target: 'http://localhost:8002',
         changeOrigin: true,
+        timeout: 300000, // 5分钟超时
       },
       '/studio-uploads': {
         target: 'http://localhost:8002',
         changeOrigin: true,
+        timeout: 300000,
       },
     },
   },

@@ -23,10 +23,10 @@ import httpx
 from fastapi import APIRouter, Query
 from sqlalchemy import select
 
-from studio.backend.core.config import settings
-from studio.backend.core.database import async_session_maker
-from studio.backend.models import WorkspaceDir
-from studio.backend.services.copilot_auth import copilot_auth
+from backend.core.config import settings
+from backend.core.database import async_session_maker
+from backend.models import WorkspaceDir
+from backend.services.copilot_auth import copilot_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/endpoint-probe", tags=["Endpoint Probe"])

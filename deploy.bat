@@ -112,7 +112,7 @@ goto :eof
 call :ensure_backend_deps
 call :check_device_deps
 cd /d "%PROJECT_ROOT%"
-python -m uvicorn studio.backend.main:app --host %DEPLOY_BACKEND_HOST% --port %DEPLOY_BACKEND_PORT%
+python -m uvicorn backend.main:app --host %DEPLOY_BACKEND_HOST% --port %DEPLOY_BACKEND_PORT%
 goto :eof
 
 :run_frontend
@@ -129,7 +129,7 @@ call :check_device_deps
 call :build_frontend
 
 echo [INFO] 启动后端窗口...
-start "AI-Studio Deploy Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && set PYTHONPATH=%PYTHONPATH% && set STUDIO_DATA_PATH=%STUDIO_DATA_PATH% && set WORKSPACE_PATH=%WORKSPACE_PATH% && set STUDIO_ADMIN_USER=%STUDIO_ADMIN_USER% && set STUDIO_ADMIN_PASS=%STUDIO_ADMIN_PASS% && set STUDIO_SECRET_KEY=%STUDIO_SECRET_KEY% && python -m uvicorn studio.backend.main:app --host %DEPLOY_BACKEND_HOST% --port %DEPLOY_BACKEND_PORT%"
+start "AI-Studio Deploy Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && set PYTHONPATH=%PYTHONPATH% && set STUDIO_DATA_PATH=%STUDIO_DATA_PATH% && set WORKSPACE_PATH=%WORKSPACE_PATH% && set STUDIO_ADMIN_USER=%STUDIO_ADMIN_USER% && set STUDIO_ADMIN_PASS=%STUDIO_ADMIN_PASS% && set STUDIO_SECRET_KEY=%STUDIO_SECRET_KEY% && python -m uvicorn backend.main:app --host %DEPLOY_BACKEND_HOST% --port %DEPLOY_BACKEND_PORT%"
 
 echo [INFO] 启动前端窗口...
 start "AI-Studio Deploy Frontend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT%frontend && npm run preview -- --host %DEPLOY_FRONTEND_HOST% --port %DEPLOY_FRONTEND_PORT%"

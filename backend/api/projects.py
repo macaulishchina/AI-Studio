@@ -11,14 +11,14 @@ from sqlalchemy import select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from studio.backend.core.config import settings
-from studio.backend.core.database import get_db
-from studio.backend.core.security import get_optional_studio_user
-from studio.backend.core.project_types import (
+from backend.core.config import settings
+from backend.core.database import get_db
+from backend.core.security import get_optional_studio_user
+from backend.core.project_types import (
     get_project_type, get_all_project_types, get_stages, get_ui_labels,
     get_modules, DEFAULT_PROJECT_TYPE,
 )
-from studio.backend.models import Project, ProjectStatus, Message, Role
+from backend.models import Project, ProjectStatus, Message, Role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/projects", tags=["Projects"])
@@ -261,7 +261,7 @@ async def update_project(
 
     # 状态跳转验证: 不允许跳过阶段
     if "status" in update_data:
-        from studio.backend.core.project_types import validate_stage_transition
+        from backend.core.project_types import validate_stage_transition
         type_key = getattr(project, 'project_type', None) or 'requirement'
         current_status = project.status.value if hasattr(project.status, 'value') else str(project.status)
         new_status = update_data["status"]

@@ -9,32 +9,34 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from studio.backend.core.database import init_db
-from studio.backend.api.projects import router as projects_router
-from studio.backend.api.discussion import router as discussion_router
-from studio.backend.api.implementation import router as implementation_router
-from studio.backend.api.deployment import router as deployment_router
-from studio.backend.api.snapshots import router as snapshots_router, system_router
-from studio.backend.api.models_api import router as models_router
-from studio.backend.api.model_config import router as model_config_router
-from studio.backend.api.copilot_auth_api import router as copilot_auth_router
-from studio.backend.api.studio_auth import router as studio_auth_router
-from studio.backend.api.endpoint_probe import router as endpoint_probe_router
-from studio.backend.api.provider_api import router as provider_router, seed_providers
-from studio.backend.api.roles import router as roles_router
-from studio.backend.api.skills import router as skills_router
-from studio.backend.api.tools import router as tools_router
-from studio.backend.api.workflows import module_router as workflow_module_router, workflow_router as workflow_router
-from studio.backend.api.tasks import project_router as tasks_project_router, task_router as tasks_router
-from studio.backend.api.ws import router as ws_router
-from studio.backend.api.users import router as users_router
-from studio.backend.api.command_auth import router as command_auth_router
-from studio.backend.api.workspace_dirs import router as workspace_dirs_router
-from studio.backend.api.mcp import router as mcp_router, seed_mcp_servers
-from studio.backend.api.conversations import router as conversations_router
-from studio.backend.api.observability import router as observability_router
-from studio.backend.api.voice import router as voice_router
-from studio.backend.api.camera import router as camera_router
+from backend.core.database import init_db
+from backend.api.projects import router as projects_router
+from backend.api.discussion import router as discussion_router
+from backend.api.implementation import router as implementation_router
+from backend.api.deployment import router as deployment_router
+from backend.api.snapshots import router as snapshots_router, system_router
+from backend.api.models_api import router as models_router
+from backend.api.model_config import router as model_config_router
+from backend.api.copilot_auth_api import router as copilot_auth_router
+from backend.api.studio_auth import router as studio_auth_router
+from backend.api.endpoint_probe import router as endpoint_probe_router
+from backend.api.provider_api import router as provider_router, seed_providers
+from backend.api.roles import router as roles_router
+from backend.api.skills import router as skills_router
+from backend.api.tools import router as tools_router
+from backend.api.workflows import module_router as workflow_module_router, workflow_router as workflow_router
+from backend.api.tasks import project_router as tasks_project_router, task_router as tasks_router
+from backend.api.ws import router as ws_router
+from backend.api.users import router as users_router
+from backend.api.command_auth import router as command_auth_router
+from backend.api.workspace_dirs import router as workspace_dirs_router
+from backend.api.mcp import router as mcp_router, seed_mcp_servers
+from backend.api.conversations import router as conversations_router
+from backend.api.observability import router as observability_router
+from backend.api.voice import router as voice_router
+from backend.api.camera import router as camera_router
+from backend.api.stt import router as stt_router
+from backend.api.antigravity_auth_api import router as antigravity_auth_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,8 +56,8 @@ async def lifespan(app: FastAPI):
     await _auto_migrate()
 
     # 加载能力覆盖到内存
-    from studio.backend.api.model_config import load_capability_overrides_to_cache
-    from studio.backend.api.models_api import load_pricing_overrides_from_db
+    from backend.api.model_config import load_capability_overrides_to_cache
+    from backend.api.models_api import load_pricing_overrides_from_db
     await load_capability_overrides_to_cache()
     await load_pricing_overrides_from_db()
 
@@ -63,23 +65,23 @@ async def lifespan(app: FastAPI):
     await seed_providers()
 
     # 种子数据: 内置角色
-    from studio.backend.api.roles import seed_roles
+    from backend.api.roles import seed_roles
     await seed_roles()
 
     # 种子数据: 内置技能定义
-    from studio.backend.api.skills import seed_skills
+    from backend.api.skills import seed_skills
     await seed_skills()
 
     # 种子数据: 内置工具定义
-    from studio.backend.api.tools import seed_tools
+    from backend.api.tools import seed_tools
     await seed_tools()
 
     # 加载工具定义到内存缓存 (必须在 seed_tools 之后)
-    from studio.backend.services.tool_registry import load_tools_from_db
+    from backend.services.tool_registry import load_tools_from_db
     await load_tools_from_db()
 
     # 种子数据: 工作流模块 + 工作流
-    from studio.backend.api.workflows import seed_workflow_modules, seed_workflows, load_workflows_to_cache
+    from backend.api.workflows import seed_workflow_modules, seed_workflows, load_workflows_to_cache
     await seed_workflow_modules()
     await seed_workflows()
     await load_workflows_to_cache()
@@ -91,7 +93,7 @@ async def lifespan(app: FastAPI):
     await _migrate_ask_user_permission()
 
     # 恢复残留的 AI 任务 (服务重启时标记 running→failed)
-    from studio.backend.services.task_runner import TaskManager
+    from backend.services.task_runner import TaskManager
     await TaskManager.recover_stale_tasks()
 
     # 同步活跃工作目录: DB 中的活跃目录 → settings.workspace_path
@@ -99,7 +101,7 @@ async def lifespan(app: FastAPI):
 
     # MCP 框架初始化
     await seed_mcp_servers()
-    from studio.backend.services.mcp.registry import MCPServerRegistry
+    from backend.services.mcp.registry import MCPServerRegistry
     await MCPServerRegistry.get_instance().load_from_db()
 
     # 加载 DB 持久化的系统配置到 settings
@@ -109,18 +111,18 @@ async def lifespan(app: FastAPI):
 
     # ── 关闭所有活跃的硬件 SSE 流 (防止 shutdown 阻塞热更新) ──
     try:
-        from studio.backend.api.voice import shutdown_all_streams as voice_shutdown
+        from backend.api.voice import shutdown_all_streams as voice_shutdown
         voice_shutdown()
     except Exception:
         pass
     try:
-        from studio.backend.api.camera import shutdown_all_streams as camera_shutdown
+        from backend.api.camera import shutdown_all_streams as camera_shutdown
         camera_shutdown()
     except Exception:
         pass
 
     # 关闭 MCP 连接
-    from studio.backend.services.mcp.client_manager import MCPClientManager
+    from backend.services.mcp.client_manager import MCPClientManager
     await MCPClientManager.get_instance().disconnect_all()
 
     logger.info("🐕 Dogi 关闭")
@@ -129,7 +131,7 @@ async def lifespan(app: FastAPI):
 async def _auto_migrate():
     """轻量级自动迁移: 检查并添加缺失的列"""
     import aiosqlite
-    from studio.backend.core.config import settings
+    from backend.core.config import settings
     db_path = settings.data_path + "/studio.db"
     try:
         async with aiosqlite.connect(db_path) as db:
@@ -444,7 +446,7 @@ async def _auto_migrate():
 
 async def _migrate_null_role_projects():
     """一次性迁移: 为旧项目设置 project_type + 设置缺少 role_id 的默认值"""
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     from sqlalchemy import text
     try:
         async with async_session_maker() as db:
@@ -497,7 +499,7 @@ app = FastAPI(
 
 async def _migrate_ask_user_permission():
     """一次性迁移: 为旧项目的 tool_permissions 添加 ask_user（默认开启）"""
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     from sqlalchemy import text
     import json
     try:
@@ -531,7 +533,7 @@ async def _sync_active_workspace():
     默认: DB 活跃目录优先。
     若设置 WORKSPACE_PATH_FORCE=true/1/on，则强制使用环境变量 WORKSPACE_PATH 并同步到 DB。
     """
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     from sqlalchemy import text
     try:
         async with async_session_maker() as db:
@@ -610,7 +612,7 @@ async def _load_studio_config():
 
     DB 配置优先于 .env，这样用户在界面上保存的值重启后仍有效。
     """
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     from sqlalchemy import text
 
     # 可覆盖的 settings 字段白名单
@@ -667,6 +669,8 @@ app.include_router(observability_router)
 app.include_router(conversations_router)
 app.include_router(voice_router)
 app.include_router(camera_router)
+app.include_router(stt_router)
+app.include_router(antigravity_auth_router)
 
 
 @app.get("/studio-api/health")

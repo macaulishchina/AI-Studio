@@ -35,7 +35,7 @@ class RAGContextSource(BaseContextSource):
             return []
 
         try:
-            from studio.backend.ai.rag.retriever import get_retriever
+            from backend.ai.rag.retriever import get_retriever
             retriever = get_retriever()
             if not retriever:
                 return []

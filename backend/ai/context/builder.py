@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from studio.backend.core.token_utils import estimate_tokens
+from backend.core.token_utils import estimate_tokens
 
 logger = logging.getLogger(__name__)
 

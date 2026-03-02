@@ -3,18 +3,21 @@
  */
 import { ref, computed, h } from 'vue'
 import { useMessage } from 'naive-ui'
-import { modelApi } from '@/api'
+import { modelApi, systemApi } from '@/api'
 import { useStudioConfigStore } from '@/stores/studioConfig'
 import { getProviderIcon } from '@/utils/providerIcons'
 import { formatTokens } from './useChatUtils'
 
-export function useModelSelection(initialModel: string) {
+export function useModelSelection(initialModel: string, options?: { useGlobalDefault?: boolean }) {
   const message = useMessage()
   const studioConfig = useStudioConfigStore()
 
   const models = ref<any[]>([])
   const selectedModel = ref(initialModel)
   const loadingModels = ref(false)
+
+  // 服务端聊天模型白名单 (空 = 不限制)
+  const chatModelAllowlist = ref<string[]>([])
 
   const modelSourceFilter = computed({
     get: () => studioConfig.chatModelSourceFilter,
@@ -84,6 +87,11 @@ export function useModelSelection(initialModel: string) {
 
     const filtered = sourceFiltered.filter(m => studioConfig.isModelVisible(m))
 
+    // 服务端白名单过滤 (chatModelAllowlist 非空时生效)
+    const allowlisted = chatModelAllowlist.value.length > 0
+      ? filtered.filter(m => chatModelAllowlist.value.includes(m.id))
+      : filtered
+
     const mapOpt = (m: any) => ({
       label: m.name, value: m.id,
       description: m.summary || m.description || '',
@@ -99,7 +107,7 @@ export function useModelSelection(initialModel: string) {
 
     const groups: Array<{ key: string; label: string; slug: string; items: any[] }> = []
     const groupMap: Record<string, typeof groups[0]> = {}
-    for (const m of filtered) {
+    for (const m of allowlisted) {
       const family = m.model_family || m.publisher || m.provider_slug || 'Other'
       const slug = m.provider_slug || (m.api_backend === 'copilot' ? 'copilot' : 'github')
       const gKey = slug + ':' + family
@@ -235,8 +243,18 @@ export function useModelSelection(initialModel: string) {
 
   async function loadModels() {
     try {
-      const { data } = await modelApi.list({ category: 'discussion', custom_models: false })
-      models.value = data
+      const [modelsRes, settingsRes] = await Promise.all([
+        modelApi.list({ category: 'discussion', custom_models: false }),
+        systemApi.getModelSettings().catch(() => ({ data: {} })),
+      ])
+      models.value = modelsRes.data
+      chatModelAllowlist.value = settingsRes.data?.chat_model_allowlist || []
+      if (options?.useGlobalDefault) {
+        const configuredDefault = (settingsRes.data?.chat_default_model || '').trim()
+        if (configuredDefault) {
+          selectedModel.value = configuredDefault
+        }
+      }
       normalizeSourceFilter()
       ensureSelectedModelValid()
     } catch {}
@@ -246,6 +264,7 @@ export function useModelSelection(initialModel: string) {
     models,
     selectedModel,
     loadingModels,
+    chatModelAllowlist,
     modelSourceFilter,
     sourceFilterOptions,
     sourceFilterLabel,

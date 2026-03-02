@@ -21,7 +21,7 @@ from functools import partial
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy import select
 
-from studio.backend.core.config import settings
+from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,8 @@ def clear_overview_cache():
 async def _resolve_active_workspace_path() -> str:
     """解析当前生效工作目录: 优先 DB 活跃目录, 否则 settings.workspace_path。"""
     try:
-        from studio.backend.core.database import async_session_maker
-        from studio.backend.models import WorkspaceDir
+        from backend.core.database import async_session_maker
+        from backend.models import WorkspaceDir
         async with async_session_maker() as db:
             row = (await db.execute(
                 select(WorkspaceDir.path).where(WorkspaceDir.is_active == True).limit(1)
@@ -231,8 +231,8 @@ async def _resolve_project_git_config(project_id: int) -> Tuple[str, str, str, s
     2) 当前活跃 WorkspaceDir.github_*
     3) settings.github_*（仅兜底）
     """
-    from studio.backend.core.database import async_session_maker
-    from studio.backend.models import Project, WorkspaceDir
+    from backend.core.database import async_session_maker
+    from backend.models import Project, WorkspaceDir
 
     project_ws = ""
     active_ws = None

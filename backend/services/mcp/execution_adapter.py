@@ -17,18 +17,18 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from studio.backend.services.mcp.tool_adapter import (
+from backend.services.mcp.tool_adapter import (
     is_mcp_tool,
     parse_studio_tool_name,
     mcp_result_to_text,
     openai_args_to_mcp,
     mcp_tools_to_openai,
 )
-from studio.backend.services.mcp.registry import MCPServerRegistry
-from studio.backend.services.mcp.client_manager import MCPClientManager
-from studio.backend.services.mcp.permission_bridge import check_mcp_permission
-from studio.backend.services.mcp.secret_resolver import resolve_env_for_server
-from studio.backend.services.mcp.audit import log_mcp_call, check_rate_limit
+from backend.services.mcp.registry import MCPServerRegistry
+from backend.services.mcp.client_manager import MCPClientManager
+from backend.services.mcp.permission_bridge import check_mcp_permission
+from backend.services.mcp.secret_resolver import resolve_env_for_server
+from backend.services.mcp.audit import log_mcp_call, check_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class MCPExecutionAdapter:
             )
         else:
             # 本地内置工具 → 委托给 tool_registry
-            from studio.backend.services.tool_registry import execute_tool
+            from backend.services.tool_registry import execute_tool
             return await execute_tool(
                 name=tool_name,
                 arguments=arguments,
@@ -247,7 +247,7 @@ async def _github_fallback(
 ) -> Optional[str]:
     """GitHub MCP 工具 → github_service.py fallback 映射"""
     import json
-    from studio.backend.services import github_service
+    from backend.services import github_service
 
     # 解析 token/repo (复用现有逻辑)
     token, repo = await _resolve_github_creds(workspace_dir, project_id)
@@ -306,8 +306,8 @@ async def _resolve_github_creds(
 ) -> Tuple[str, str]:
     """解析 GitHub token 和 repo"""
     try:
-        from studio.backend.core.database import async_session_maker
-        from studio.backend.models import WorkspaceDir, Project
+        from backend.core.database import async_session_maker
+        from backend.models import WorkspaceDir, Project
         from sqlalchemy import select
 
         async with async_session_maker() as db:
@@ -343,5 +343,5 @@ async def _resolve_github_creds(
     except Exception:
         pass
 
-    from studio.backend.core.config import settings
+    from backend.core.config import settings
     return (settings.github_token or "").strip(), (settings.github_repo or "").strip()

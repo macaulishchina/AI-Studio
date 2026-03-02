@@ -35,7 +35,7 @@ class EmbeddingService:
         优先使用 LLM Provider，失败时 fallback 到 TF-IDF。
         """
         try:
-            from studio.backend.ai.llm import get_llm_client
+            from backend.ai.llm import get_llm_client
             client = get_llm_client()
             result = await client.embed(texts, self._model)
             if result and len(result) == len(texts):

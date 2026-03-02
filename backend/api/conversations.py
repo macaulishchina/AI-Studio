@@ -16,10 +16,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings
-from studio.backend.core.database import get_db
-from studio.backend.core.security import get_studio_user, get_optional_studio_user
-from studio.backend.models import Conversation, Message, MessageRole, MessageType, Role, AiTask
+from backend.core.config import settings
+from backend.core.database import get_db
+from backend.core.security import get_studio_user, get_optional_studio_user
+from backend.models import Conversation, Message, MessageRole, MessageType, Role, AiTask
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/conversations", tags=["Conversations"])
@@ -229,7 +229,7 @@ async def discuss(
     发送消息到对话, 启动 AI 后台任务.
     返回 {"task_id": N} — 前端通过 GET /studio-api/tasks/{task_id}/stream 订阅 SSE.
     """
-    from studio.backend.services.task_runner import TaskManager, ProjectEventBus
+    from backend.services.task_runner import TaskManager, ProjectEventBus
 
     # 获取对话
     result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
@@ -279,7 +279,11 @@ async def discuss(
             },
         })
 
-    model = conv.model or "gpt-4o"
+    # 模型解析优先级: 对话绑定模型 > 全局默认 > 硬编码 fallback
+    model = conv.model
+    if not model:
+        from backend.services.config_service import get_chat_default_model
+        model = await get_chat_default_model() or "gpt-4o"
 
     # 启动后台 AI 任务
     task_id = await TaskManager.start_conversation_task(
@@ -324,7 +328,7 @@ async def summarize_context(
     user: Optional[dict] = Depends(get_optional_studio_user),
 ):
     """手动触发上下文总结"""
-    from studio.backend.services.context_manager import _generate_summary
+    from backend.services.context_manager import _generate_summary
 
     result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv = result.scalar_one_or_none()

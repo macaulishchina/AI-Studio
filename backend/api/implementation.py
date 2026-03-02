@@ -21,10 +21,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings
-from studio.backend.core.database import get_db
-from studio.backend.models import Project, ProjectStatus, WorkspaceDir
-from studio.backend.services import github_service
+from backend.core.config import settings
+from backend.core.database import get_db
+from backend.models import Project, ProjectStatus, WorkspaceDir
+from backend.services import github_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/projects", tags=["Implementation"])
@@ -595,7 +595,7 @@ async def prepare_review(
     3. 获取 diff 统计和变更文件列表
     4. 更新项目的工作区路径
     """
-    from studio.backend.services import workspace_service
+    from backend.services import workspace_service
 
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -633,7 +633,7 @@ async def get_workspace_info(
     db: AsyncSession = Depends(get_db),
 ):
     """获取项目当前工作区的 git 信息"""
-    from studio.backend.services import workspace_service
+    from backend.services import workspace_service
 
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -663,7 +663,7 @@ async def start_iteration(
     2. 重置状态为 discussing
     3. 递增 iteration_count
     """
-    from studio.backend.services import workspace_service
+    from backend.services import workspace_service
 
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -720,8 +720,8 @@ async def _trigger_auto_review(project_id: int, branch: str, pr_number: int = No
     由 get_implementation_status 在检测到 agent_done 时异步触发.
     """
     try:
-        from studio.backend.services import workspace_service
-        from studio.backend.core.database import async_session_maker
+        from backend.services import workspace_service
+        from backend.core.database import async_session_maker
 
         # 1. 准备审查工作区 (克隆/更新仓库, 切换到实施分支)
         ws_result = await workspace_service.prepare_review_workspace(
@@ -741,7 +741,7 @@ async def _trigger_auto_review(project_id: int, branch: str, pr_number: int = No
                     await db.commit()
 
             # 2. 启动自动审查任务
-            from studio.backend.services.task_runner import TaskManager
+            from backend.services.task_runner import TaskManager
             task_id = await TaskManager.start_auto_review_task(project_id)
             logger.info(f"项目 {project_id} 自动审查已启动 (task_id={task_id})")
         else:

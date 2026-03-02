@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db, async_session_maker
-from studio.backend.models import ToolDefinition
-from studio.backend.services.tool_registry import load_tools_from_db as _refresh_tool_cache
+from backend.core.database import get_db, async_session_maker
+from backend.models import ToolDefinition
+from backend.services.tool_registry import load_tools_from_db as _refresh_tool_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/tools", tags=["Tools"])
@@ -441,7 +441,7 @@ async def list_permissions(db: AsyncSession = Depends(get_db)):
 
     # 5) 追加 MCP 服务级权限 (动态从 mcp_servers 表读取已启用的服务)
     try:
-        from studio.backend.models import MCPServer as MCPServerModel
+        from backend.models import MCPServer as MCPServerModel
         mcp_result = await db.execute(
             select(MCPServerModel).where(MCPServerModel.enabled.is_(True)).order_by(MCPServerModel.sort_order)
         )

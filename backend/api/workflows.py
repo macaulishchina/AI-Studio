@@ -11,8 +11,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db, async_session_maker
-from studio.backend.models import WorkflowModule, Workflow
+from backend.core.database import get_db, async_session_maker
+from backend.models import WorkflowModule, Workflow
 
 logger = logging.getLogger(__name__)
 

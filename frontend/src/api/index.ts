@@ -198,6 +198,20 @@ export const copilotAuthApi = {
   logout: () => api.post('/copilot-auth/logout'),
   test: () => api.post('/copilot-auth/test'),
   usage: () => api.get('/copilot-auth/usage'),
+  // 多账号
+  accounts: () => api.get('/copilot-auth/accounts'),
+  switchAccount: (index: number) => api.post('/copilot-auth/accounts/switch', { index }),
+  removeAccount: (index: number) => api.delete(`/copilot-auth/accounts/${index}`),
+}
+
+// ==================== Anti-Gravity OAuth ====================
+export const antigravityAuthApi = {
+  status: () => api.get('/antigravity-auth/status'),
+  startDeviceFlow: () => api.post('/antigravity-auth/device-flow/start'),
+  pollDeviceFlow: () => api.post('/antigravity-auth/device-flow/poll'),
+  logout: () => api.post('/antigravity-auth/logout'),
+  test: () => api.post('/antigravity-auth/test'),
+  usage: () => api.get('/antigravity-auth/usage'),
 }
 
 // ==================== 系统 ====================
@@ -222,6 +236,9 @@ export const systemApi = {
   clearGitlabUrl: () => api.delete('/system/gitlab-url'),
   // SVN 校验
   validateSvn: () => api.post('/system/svn-validate'),
+  // 模型设置 (chat / stt)
+  getModelSettings: () => api.get('/system/model-settings'),
+  setModelSettings: (data: Record<string, any>) => api.post('/system/model-settings', data),
 }
 
 // ==================== 工作目录管理 ====================
@@ -393,8 +410,10 @@ export const voiceApi = {
   testCapture: (params?: { device?: number; duration?: number; samplerate?: number; channels?: number }) =>
     api.post('/voice/test-capture', null, { params }),
   /** 录音并返回 WAV 音频文件 */
-  recordAudio: (params?: { device?: number; duration?: number; samplerate?: number; channels?: number }, timeout?: number) =>
-    api.post('/voice/record-audio', null, { params, responseType: 'blob', timeout: timeout || 60000 }),
+  recordAudio: (params?: { device?: number; duration?: number; samplerate?: number; channels?: number }, timeout?: number) => {
+    const defaultTimeout = params?.duration ? Math.max(60000, params.duration * 1000 + 30000) : 60000;
+    return api.post('/voice/record-audio', null, { params, responseType: 'blob', timeout: timeout || defaultTimeout });
+  },
   /** 实时音量 SSE 流 URL (直接给 EventSource 使用) */
   levelStreamUrl: (params?: { device?: number; samplerate?: number; interval_ms?: number }) => {
     const qs = new URLSearchParams()
@@ -403,6 +422,37 @@ export const voiceApi = {
     if (params?.interval_ms) qs.set('interval_ms', String(params.interval_ms))
     const query = qs.toString()
     return `/studio-api/voice/level-stream${query ? '?' + query : ''}`
+  },
+}
+
+// ==================== 服务端 STT (Speech-to-Text) ====================
+export const sttApi = {
+  /** STT 配置状态 */
+  status: () => api.get('/stt/status'),
+  /** 可用 STT 模型列表 */
+  models: () => api.get('/stt/models'),
+  /** 非流式转写 — 上传音频文件 */
+  transcribe: (file: File | Blob, params?: { model?: string; language?: string; prompt?: string }) => {
+    const formData = new FormData()
+    formData.append('file', file, (file as File).name || 'audio.wav')
+    if (params?.model) formData.append('model', params.model)
+    if (params?.language) formData.append('language', params.language)
+    if (params?.prompt) formData.append('prompt', params.prompt)
+    return api.post('/stt/transcribe', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    })
+  },
+  /** 流式转写 SSE URL (服务端麦克风) */
+  transcribeStreamUrl: (params?: { device?: number; model?: string; language?: string; samplerate?: number; duration?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.device != null) qs.set('device', String(params.device))
+    if (params?.model) qs.set('model', params.model)
+    if (params?.language) qs.set('language', params.language)
+    if (params?.samplerate) qs.set('samplerate', String(params.samplerate))
+    if (params?.duration) qs.set('duration', String(params.duration))
+    const query = qs.toString()
+    return `/studio-api/stt/transcribe-stream${query ? '?' + query : ''}`
   },
 }
 

@@ -11,12 +11,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db, async_session_maker
-from studio.backend.models import MCPServer, MCPAuditLog
-from studio.backend.services.mcp.registry import MCPServerRegistry
-from studio.backend.services.mcp.client_manager import MCPClientManager
-from studio.backend.services.mcp.permission_bridge import get_available_mcp_permission_keys
-from studio.backend.services.mcp.secret_resolver import validate_secrets, resolve_env_for_server
+from backend.core.database import get_db, async_session_maker
+from backend.models import MCPServer, MCPAuditLog
+from backend.services.mcp.registry import MCPServerRegistry
+from backend.services.mcp.client_manager import MCPClientManager
+from backend.services.mcp.permission_bridge import get_available_mcp_permission_keys
+from backend.services.mcp.secret_resolver import validate_secrets, resolve_env_for_server
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/mcp", tags=["MCP"])

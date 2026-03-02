@@ -31,7 +31,7 @@ import subprocess
 import threading
 from typing import Any, Dict, List, Optional
 
-from studio.backend.services.mcp.registry import MCPServerConfig
+from backend.services.mcp.registry import MCPServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -548,7 +548,7 @@ class MCPClientManager:
                 # 连接成功后自动发现工具
                 try:
                     tools = await conn.list_tools()
-                    from studio.backend.services.mcp.registry import MCPServerRegistry
+                    from backend.services.mcp.registry import MCPServerRegistry
                     MCPServerRegistry.get_instance().update_discovered_tools(slug, tools)
                     logger.info(f"MCP Client {slug}: 发现 {len(tools)} 个工具")
                 except Exception as e:

@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List
 
 import httpx
 
-from studio.backend.core.config import settings
+from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
 

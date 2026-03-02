@@ -80,7 +80,7 @@
             <div class="meter">
               <span class="meter-label">RMS:</span>
               <div class="meter-bg"><div class="meter-bar" :style="{ width: audioRmsPct + '%', background: audioVolumeColor }"></div></div>
-              <span class="meter-val">{{ audioRmsPct.toFixed(0) }}%</span>
+              <span class="meter-val">{{ audioRmsPct.toFixed(0) }}% / {{ audioRmsDb.toFixed(0) }}dB</span>
             </div>
             <div class="meter" style="max-width:180px">
               <span class="meter-label">Peak:</span>
@@ -101,6 +101,8 @@
         <section class="card">
           <h3>录音测试</h3>
           <div class="ctrl-row">
+            <n-input-number v-model:value="serverCaptureDuration" :min="1" :max="600" :step="1" size="small" style="width:100px" />
+            <span class="hint">秒</span>
             <n-button :type="audioRecording ? 'error' : 'warning'" @click="audioToggleRecord"
                       :disabled="!audioCanRecord">
               {{ audioRecording ? '⏹ 停止录音' : '🎙 开始录音' }}
@@ -116,25 +118,95 @@
           </div>
         </section>
 
-        <!-- STT (browser Web Speech API) -->
+        <!-- STT (多模式: 浏览器 Web Speech / 服务端非流式 / 服务端流式) -->
         <section class="card">
           <h3>语音识别 (STT)</h3>
-          <div v-if="!sttSupported" class="error-text">⚠️ 当前浏览器不支持 Web Speech API</div>
-          <template v-else>
-            <div class="ctrl-row">
-              <n-button :type="isListening ? 'warning' : 'success'" @click="toggleSTT" :disabled="!audioStreaming">{{ isListening ? '⏸ 暂停' : '🎙 开始识别' }}</n-button>
-              <n-select v-model:value="sttLang" :options="langOptions" size="small" style="width:150px" />
-              <n-button quaternary size="small" @click="clearTranscripts">清空</n-button>
-            </div>
-            <div class="live-subtitle" :class="{ active: interimText }"><span class="interim-label">实时:</span>{{ interimText || '...' }}</div>
-            <div class="transcript-list">
-              <div v-for="(t, i) in transcripts" :key="i" class="transcript-item">
-                <span class="ts-time">{{ t.time }}</span><span class="ts-text">{{ t.text }}</span>
-                <n-tag :type="t.confidence > 0.8 ? 'success' : t.confidence > 0.5 ? 'warning' : 'error'" size="tiny">{{ (t.confidence * 100).toFixed(0) }}%</n-tag>
+          <div class="ctrl-row" style="margin-bottom: 8px">
+            <n-radio-group v-model:value="sttMode" size="small">
+              <n-radio-button value="browser">浏览器 STT</n-radio-button>
+              <n-radio-button value="server">服务端 STT</n-radio-button>
+              <n-radio-button value="server-stream">服务端流式</n-radio-button>
+            </n-radio-group>
+            <n-select v-model:value="sttLang" :options="langOptions" size="small" style="width:120px" />
+            <n-button quaternary size="small" @click="clearTranscripts">清空</n-button>
+          </div>
+
+          <!-- Browser STT -->
+          <template v-if="sttMode === 'browser'">
+            <div v-if="!sttSupported" class="error-text">⚠️ 当前浏览器不支持 Web Speech API</div>
+            <template v-else>
+              <div class="ctrl-row">
+                <n-button :type="isListening ? 'warning' : 'success'" @click="toggleSTT" :disabled="!audioStreaming">{{ isListening ? '⏸ 暂停' : '🎙 开始识别' }}</n-button>
               </div>
-              <div v-if="transcripts.length === 0" class="empty">等待语音输入...</div>
-            </div>
+            </template>
           </template>
+
+          <!-- Server STT (non-streaming) -->
+          <template v-if="sttMode === 'server'">
+            <div v-if="!serverSttConfigured" class="error-text">
+              ⚠️ 服务端 STT 未配置, 请在 设置 → 推理偏好 中配置 STT API 地址
+            </div>
+            <template v-else>
+              <div class="ctrl-row">
+                <n-select
+                  v-model:value="sttModel"
+                  :options="sttModelOptions"
+                  size="small"
+                  style="width: 220px"
+                  placeholder="STT 模型"
+                />
+                <n-button
+                  :type="serverSttRecording ? 'warning' : 'success'"
+                  @click="serverSttRecording ? stopServerSttRecording() : startServerSttRecording()"
+                  :disabled="!audioStreaming && sourceMode === 'browser'"
+                  :loading="serverSttTranscribing"
+                >
+                  {{ serverSttRecording ? '⏹ 停止录音' : '🎙 录音并转写' }}
+                </n-button>
+                <n-text v-if="serverSttRecording" type="warning" style="font-size: 12px">
+                  录音中... {{ serverSttRecordTime }}s
+                </n-text>
+              </div>
+            </template>
+          </template>
+
+          <!-- Server STT (streaming) -->
+          <template v-if="sttMode === 'server-stream'">
+            <div v-if="!serverSttConfigured" class="error-text">
+              ⚠️ 服务端 STT 未配置, 请在 设置 → 推理偏好 中配置 STT API 地址
+            </div>
+            <div v-else-if="sourceMode === 'browser'" class="error-text">
+              ⚠️ 服务端流式 STT 需要使用服务端音频源 (使用服务端麦克风)
+            </div>
+            <template v-else>
+              <div class="ctrl-row">
+                <n-select
+                  v-model:value="sttModel"
+                  :options="sttModelOptions"
+                  size="small"
+                  style="width: 220px"
+                  placeholder="STT 模型"
+                />
+                <n-button
+                  :type="serverSttStreaming ? 'warning' : 'success'"
+                  @click="serverSttStreaming ? stopServerSttStream() : startServerSttStream()"
+                >
+                  {{ serverSttStreaming ? '⏹ 停止' : '🎙 开始流式转写' }}
+                </n-button>
+              </div>
+            </template>
+          </template>
+
+          <!-- 识别结果 (共享) -->
+          <div class="live-subtitle" :class="{ active: interimText }"><span class="interim-label">实时:</span>{{ interimText || '...' }}</div>
+          <div class="transcript-list">
+            <div v-for="(t, i) in transcripts" :key="i" class="transcript-item">
+              <span class="ts-time">{{ t.time }}</span><span class="ts-text">{{ t.text }}</span>
+              <n-tag v-if="t.confidence >= 0" :type="t.confidence > 0.8 ? 'success' : t.confidence > 0.5 ? 'warning' : 'error'" size="tiny">{{ (t.confidence * 100).toFixed(0) }}%</n-tag>
+              <n-tag v-if="t.source" size="tiny" :bordered="false">{{ t.source }}</n-tag>
+            </div>
+            <div v-if="transcripts.length === 0" class="empty">等待语音输入...</div>
+          </div>
         </section>
       </template>
 
@@ -213,7 +285,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { NTag, NButton, NSelect, NInputNumber, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
-import { voiceApi, cameraApi } from '../api'
+import { voiceApi, cameraApi, sttApi } from '../api'
 
 const message = useMessage()
 
@@ -237,11 +309,19 @@ function switchCategory(key: 'audio' | 'camera') {
   if (key === activeCategory.value) return
   releaseAllResources()
   activeCategory.value = key
+  // Auto refresh devices when switching to audio
+  if (key === 'audio') {
+    nextTick(() => audioRefreshDevices())
+  }
 }
 
 // When source changes, release resources from the previous source
 watch(sourceMode, () => {
   releaseAllResources()
+  // Auto refresh devices when source mode changes and audio is active
+  if (activeCategory.value === 'audio') {
+    nextTick(() => audioRefreshDevices())
+  }
 })
 
 function releaseAllResources() {
@@ -250,6 +330,10 @@ function releaseAllResources() {
   if (serverCapturing.value) stopServerRecord()
   if (browserAudioStreaming.value) stopBrowserAudio()
   if (browserRecording.value) stopBrowserRecord()
+  // STT
+  if (isListening.value) stopSTT()
+  if (serverSttRecording.value) stopServerSttRecording()
+  if (serverSttStreaming.value) stopServerSttStream()
   // camera
   if (serverCamStreaming.value) { serverCamStreaming.value = false; serverStreamSrc.value = '' }
   if (browserCamActive.value) stopBrowserCamera()
@@ -283,21 +367,23 @@ const selectedServerAudioIdx = ref<number>(-1)
 
 const serverStreaming = ref(false)
 const serverRmsPct = ref(0)
+const serverRmsDb = ref(-100)
 const serverPeakPct = ref(0)
 const serverPeakDb = ref(-100)
 const serverStreamError = ref('')
 const serverSampleRate = ref(16000)
 const audioCanvasRef = ref<HTMLCanvasElement | null>(null)
 let serverEventSource: EventSource | null = null
-let serverLevelHistory: number[] = []
+let serverWaveformHistory: number[] = []
 let serverAnimFrame = 0
 
 const serverCapturing = ref(false)
-const serverCaptureDuration = ref(3)
+const serverCaptureDuration = ref(60)
 const serverCaptureResult = ref<any>(null)
 const serverRecordSec = ref(0)
 const serverRecordUrl = ref('')
 const serverRecordResult = ref<{ duration: string; mimeType: string; size: string } | null>(null)
+let serverRecordManuallyStopped = false
 let serverRecordTimer: ReturnType<typeof setInterval> | null = null
 let serverRecordStartTime = 0
 
@@ -307,6 +393,7 @@ const selectedBrowserMicId = ref('')
 const permissionDenied = ref(false)
 const browserAudioStreaming = ref(false)
 const browserVolumePct = ref(0)
+const browserRmsDb = ref(-100)
 const browserPeakPct = ref(0)
 const browserPeakDb = ref(-100)
 const browserSampleRate = ref(0)
@@ -325,17 +412,31 @@ let recordTimer: ReturnType<typeof setInterval> | null = null
 let recordStartTime = 0
 
 // STT
+const sttMode = ref<'browser' | 'server' | 'server-stream'>('browser')
 const sttSupported = ref(false)
 const isListening = ref(false)
 const sttLang = ref('zh-CN')
 const interimText = ref('')
-const transcripts = ref<{ time: string; text: string; confidence: number }[]>([])
+const transcripts = ref<{ time: string; text: string; confidence: number; source?: string }[]>([])
 let recognition: any = null
 const langOptions = [
   { label: '中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
   { label: '日本語', value: 'ja-JP' },
 ]
+
+// Server STT state
+const serverSttConfigured = ref(false)
+const sttModel = ref('')
+const sttModelOptions = ref<{ label: string; value: string }[]>([])
+const serverSttRecording = ref(false)
+const serverSttRecordTime = ref(0)
+const serverSttTranscribing = ref(false)
+const serverSttStreaming = ref(false)
+let serverSttRecordChunks: Blob[] = []
+let serverSttMediaRecorder: MediaRecorder | null = null
+let serverSttRecordTimer: ReturnType<typeof setInterval> | null = null
+let serverSttEventSource: EventSource | null = null
 
 // --- Unified audio computed ---
 const audioDeviceList = computed<DeviceItem[]>(() => {
@@ -372,6 +473,9 @@ const audioStreaming = computed(() =>
 )
 const audioRmsPct = computed(() =>
   sourceMode.value === 'server' ? serverRmsPct.value : browserVolumePct.value,
+)
+const audioRmsDb = computed(() =>
+  sourceMode.value === 'server' ? serverRmsDb.value : browserRmsDb.value,
 )
 const audioPeakPct = computed(() =>
   sourceMode.value === 'server' ? serverPeakPct.value : browserPeakPct.value,
@@ -480,25 +584,32 @@ async function loadServerAudioDevices() {
 }
 
 function startServerAudioStream() {
-  const url = voiceApi.levelStreamUrl(
-    selectedServerAudioIdx.value >= 0 ? { device: selectedServerAudioIdx.value } : undefined,
-  )
+  const selected = serverAudioDevices.value.find((d: any) => d.index === selectedServerAudioIdx.value)
+  const samplerate = selected?.default_samplerate ? Math.round(Number(selected.default_samplerate)) : undefined
+  const params: { device?: number; samplerate?: number; interval_ms?: number } = { interval_ms: 40 }
+  if (selectedServerAudioIdx.value >= 0) params.device = selectedServerAudioIdx.value
+  if (samplerate && samplerate > 0) params.samplerate = samplerate
+  const url = voiceApi.levelStreamUrl(params)
   serverEventSource = new EventSource(url)
   serverStreaming.value = true
   serverStreamError.value = ''
-  serverLevelHistory = []
+  serverWaveformHistory = []
   serverEventSource.onmessage = (evt) => {
     try {
       const d = JSON.parse(evt.data)
       if (d.error) { serverStreamError.value = d.error; stopServerAudioStream(); return }
       if (d.event === 'started') { if (d.samplerate) serverSampleRate.value = d.samplerate; return }
-      const rmsNorm = Math.min(1, Math.max(0, (d.rms_db + 60) / 60))
-      serverRmsPct.value = rmsNorm * 100
-      const peakNorm = Math.min(1, Math.max(0, (d.peak_db + 60) / 60))
-      serverPeakPct.value = peakNorm * 100
-      serverPeakDb.value = d.peak_db
-      serverLevelHistory.push(rmsNorm)
-      if (serverLevelHistory.length > 800) serverLevelHistory.shift()
+      const rmsDb = Number(d.rms_db ?? -100)
+      const peakDb = Number(d.peak_db ?? -100)
+      const rmsRawPct = Math.max(0, Math.min(100, (rmsDb + 60) / 60 * 100))
+      const peakRawPct = Math.max(0, Math.min(100, (peakDb + 60) / 60 * 100))
+      serverRmsDb.value = rmsDb
+      serverPeakDb.value = peakDb
+      serverRmsPct.value = serverRmsPct.value * 0.6 + rmsRawPct * 0.4
+      serverPeakPct.value = Math.max(peakRawPct, serverPeakPct.value * 0.92)
+      if (Array.isArray(d.waveform)) {
+        serverWaveformHistory = d.waveform
+      }
     } catch { /* ignore */ }
   }
   serverEventSource.onerror = () => {
@@ -512,7 +623,10 @@ function stopServerAudioStream() {
   if (serverEventSource) { serverEventSource.close(); serverEventSource = null }
   cancelAnimationFrame(serverAnimFrame)
   serverRmsPct.value = 0
+  serverRmsDb.value = -100
   serverPeakPct.value = 0
+  serverPeakDb.value = -100
+  serverWaveformHistory = []
 }
 
 let serverRecordAbort: AbortController | null = null
@@ -520,6 +634,7 @@ let serverRecordAbort: AbortController | null = null
 function startServerRecord() {
   if (serverCapturing.value) return
   serverCapturing.value = true
+  serverRecordManuallyStopped = false
   serverRecordResult.value = null
   serverCaptureResult.value = null
   if (serverRecordUrl.value) { URL.revokeObjectURL(serverRecordUrl.value); serverRecordUrl.value = '' }
@@ -565,7 +680,12 @@ function startServerRecord() {
       }
     })
     .catch((e: any) => {
-      if (e?.code === 'ERR_CANCELED') return
+      if (e?.code === 'ERR_CANCELED') {
+        if (serverRecordManuallyStopped) {
+          message.warning('录音已手动停止。由于服务端录音技术限制，无法获取已录制的音频数据。请使用浏览器模式进行录音以获得更好的控制。')
+        }
+        return
+      }
       const errMsg = e?.response?.data?.detail || e?.message || String(e)
       message.error('录音失败: ' + errMsg)
     })
@@ -579,6 +699,7 @@ function startServerRecord() {
 function stopServerRecord() {
   // Server recording is fixed-duration, we can't truly stop early.
   // But we can abort the request if the user clicks stop.
+  serverRecordManuallyStopped = true
   if (serverRecordAbort) serverRecordAbort.abort()
   serverCapturing.value = false
   if (serverRecordTimer) { clearInterval(serverRecordTimer); serverRecordTimer = null }
@@ -611,15 +732,21 @@ async function refreshBrowserMics() {
 
 async function startBrowserAudio() {
   try {
-    const constraints: MediaStreamConstraints = {
-      audio: selectedBrowserMicId.value ? { deviceId: { exact: selectedBrowserMicId.value } } : true,
-    }
+    const audioOptions: MediaTrackConstraints = selectedBrowserMicId.value
+      ? { deviceId: { exact: selectedBrowserMicId.value } }
+      : {}
+    audioOptions.channelCount = 1
+    audioOptions.echoCancellation = false
+    audioOptions.noiseSuppression = false
+    audioOptions.autoGainControl = false
+    const constraints: MediaStreamConstraints = { audio: audioOptions }
     mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
     audioCtx = new AudioContext()
     browserSampleRate.value = audioCtx.sampleRate
     const source = audioCtx.createMediaStreamSource(mediaStream)
     analyser = audioCtx.createAnalyser()
     analyser.fftSize = 2048
+    analyser.smoothingTimeConstant = 0.7
     source.connect(analyser)
     browserAudioStreaming.value = true
     drawAudioCanvas()
@@ -635,11 +762,70 @@ function stopBrowserAudio() {
   if (audioCtx) { audioCtx.close(); audioCtx = null }
   analyser = null
   browserVolumePct.value = 0
+  browserRmsDb.value = -100
+  browserPeakPct.value = 0
+  browserPeakDb.value = -100
   if (isListening.value) stopSTT()
   if (browserRecording.value) stopBrowserRecord()
 }
 
 // ─── Unified canvas draw ───
+function drawWaveOverlay(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  waveform: ArrayLike<number>,
+  color: string,
+  rmsPct: number,
+  peakPct: number,
+) {
+  const w = canvas.width
+  const h = canvas.height
+  const midY = h / 2
+  ctx.fillStyle = '#1a1a1a'
+  ctx.fillRect(0, 0, w, h)
+
+  ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(124,108,255,0.16)'
+  ctx.beginPath()
+  ctx.moveTo(0, midY)
+  ctx.lineTo(w, midY)
+  ctx.stroke()
+
+  const length = waveform.length || 0
+  if (length > 1) {
+    ctx.lineWidth = 2
+    ctx.strokeStyle = color
+    ctx.beginPath()
+    const step = Math.max(1, Math.floor(length / 260))
+    let pointIndex = 0
+    for (let i = 0; i < length; i += step) {
+      const x = (pointIndex / Math.max(Math.ceil(length / step) - 1, 1)) * w
+      const amp = Math.max(-1, Math.min(1, Number(waveform[i] || 0)))
+      const y = midY + amp * (h * 0.42)
+      pointIndex === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+      pointIndex += 1
+    }
+    ctx.stroke()
+  }
+
+  const meterW = 10
+  const meterX = w - meterW - 6
+  const meterY = 6
+  const meterH = h - 12
+  ctx.fillStyle = '#2a2a2a'
+  ctx.fillRect(meterX, meterY, meterW, meterH)
+  const rmsH = meterH * Math.max(0, Math.min(1, rmsPct / 100))
+  ctx.fillStyle = color
+  ctx.fillRect(meterX, meterY + meterH - rmsH, meterW, rmsH)
+  const peakY = meterY + meterH - meterH * Math.max(0, Math.min(1, peakPct / 100))
+  ctx.strokeStyle = '#ff9800'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(meterX - 3, peakY)
+  ctx.lineTo(meterX + meterW + 3, peakY)
+  ctx.stroke()
+}
+
 function drawAudioCanvas() {
   const canvas = audioCanvasRef.value
   if (!canvas) {
@@ -649,64 +835,43 @@ function drawAudioCanvas() {
     else browserAnimFrame = frame
     return
   }
-  const ctx = canvas.getContext('2d')!
+  const viewCanvas = canvas
+  const ctx = viewCanvas.getContext('2d')!
 
   if (sourceMode.value === 'server') {
     function drawServer() {
       if (!serverStreaming.value) return
       serverAnimFrame = requestAnimationFrame(drawServer)
-      ctx.fillStyle = '#1a1a1a'
-      ctx.fillRect(0, 0, canvas!.width, canvas!.height)
-      if (serverLevelHistory.length < 2) return
-      ctx.lineWidth = 1.5
-      ctx.strokeStyle = '#4caf50'
-      ctx.beginPath()
-      const w = canvas!.width, h = canvas!.height
-      const step = w / Math.max(serverLevelHistory.length - 1, 1)
-      for (let i = 0; i < serverLevelHistory.length; i++) {
-        const x = i * step, y = h - serverLevelHistory[i] * h
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-      }
-      ctx.stroke()
+      drawWaveOverlay(ctx, viewCanvas, serverWaveformHistory, '#4caf50', serverRmsPct.value, serverPeakPct.value)
     }
     drawServer()
   } else {
     if (!analyser) return
-    const bufLen = analyser.frequencyBinCount
-    const data = new Uint8Array(bufLen)
+    const bufLen = analyser.fftSize
+    const data = new Float32Array(bufLen)
     const localAnalyser = analyser
     function drawBrowser() {
       if (!localAnalyser || !browserAudioStreaming.value) return
       browserAnimFrame = requestAnimationFrame(drawBrowser)
-      localAnalyser.getByteTimeDomainData(data)
+      localAnalyser.getFloatTimeDomainData(data)
       let sum = 0
       let maxAbs = 0
       for (let i = 0; i < bufLen; i++) {
-        const v = (data[i] - 128) / 128
+        const v = data[i]
         sum += v * v
         const abs = Math.abs(v)
         if (abs > maxAbs) maxAbs = abs
       }
       const rms = Math.sqrt(sum / bufLen)
-      browserVolumePct.value = Math.min(100, rms * 300)
-      // Peak: map to 0-100 (same -60~0 dB range as server)
+      const rmsDb = 20 * Math.log10(rms + 1e-10)
       const peakDb = 20 * Math.log10(maxAbs + 1e-10)
+      const rmsRawPct = Math.max(0, Math.min(100, (rmsDb + 60) / 60 * 100))
+      const peakRawPct = Math.max(0, Math.min(100, (peakDb + 60) / 60 * 100))
+      browserRmsDb.value = rmsDb
       browserPeakDb.value = peakDb
-      browserPeakPct.value = Math.max(0, Math.min(100, (peakDb + 60) / 60 * 100))
-      ctx.fillStyle = '#1a1a1a'
-      ctx.fillRect(0, 0, canvas!.width, canvas!.height)
-      ctx.lineWidth = 2
-      ctx.strokeStyle = '#7c6cff'
-      ctx.beginPath()
-      const sliceW = canvas!.width / bufLen
-      let x = 0
-      for (let i = 0; i < bufLen; i++) {
-        const y = (data[i] / 255) * canvas!.height
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-        x += sliceW
-      }
-      ctx.lineTo(canvas!.width, canvas!.height / 2)
-      ctx.stroke()
+      browserVolumePct.value = browserVolumePct.value * 0.6 + rmsRawPct * 0.4
+      browserPeakPct.value = Math.max(peakRawPct, browserPeakPct.value * 0.92)
+      drawWaveOverlay(ctx, viewCanvas, data, '#7c6cff', browserVolumePct.value, browserPeakPct.value)
     }
     drawBrowser()
   }
@@ -778,6 +943,149 @@ function startSTT() { if (!recognition) initSTT(); if (!recognition) return; rec
 function stopSTT() { recognition?.stop(); isListening.value = false; interimText.value = '' }
 function toggleSTT() { isListening.value ? stopSTT() : startSTT() }
 function clearTranscripts() { transcripts.value = []; interimText.value = '' }
+
+// ─── Server STT ───
+async function loadSttStatus() {
+  try {
+    const { data } = await sttApi.status()
+    serverSttConfigured.value = !!data.configured
+    sttModel.value = data.default_model || ''
+  } catch { serverSttConfigured.value = false }
+}
+
+async function loadSttModels() {
+  try {
+    const { data } = await sttApi.models()
+    sttModelOptions.value = (data || []).map((m: any) => ({ label: m.name || m.id, value: m.id }))
+    if (!sttModel.value && sttModelOptions.value.length > 0) {
+      sttModel.value = sttModelOptions.value[0].value
+    }
+  } catch { sttModelOptions.value = [] }
+}
+
+// Server STT (non-streaming): record from browser, send file to server
+function startServerSttRecording() {
+  if (!mediaStream) {
+    message.warning('请先开启音频源')
+    return
+  }
+  serverSttRecordChunks = []
+  const options: MediaRecorderOptions = {}
+  try { if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) options.mimeType = 'audio/webm;codecs=opus' } catch {}
+  serverSttMediaRecorder = new MediaRecorder(mediaStream, options)
+  serverSttMediaRecorder.ondataavailable = (e: BlobEvent) => { if (e.data.size > 0) serverSttRecordChunks.push(e.data) }
+  serverSttMediaRecorder.onstop = async () => {
+    const blob = new Blob(serverSttRecordChunks, { type: serverSttMediaRecorder?.mimeType || 'audio/webm' })
+    serverSttRecordChunks = []
+    await transcribeServerFile(blob)
+  }
+  serverSttMediaRecorder.start(250)
+  serverSttRecording.value = true
+  serverSttRecordTime.value = 0
+  const t0 = Date.now()
+  serverSttRecordTimer = setInterval(() => { serverSttRecordTime.value = Math.floor((Date.now() - t0) / 1000) }, 500)
+}
+
+function stopServerSttRecording() {
+  if (serverSttMediaRecorder && serverSttMediaRecorder.state !== 'inactive') {
+    serverSttMediaRecorder.stop()
+  }
+  serverSttRecording.value = false
+  if (serverSttRecordTimer) { clearInterval(serverSttRecordTimer); serverSttRecordTimer = null }
+}
+
+async function transcribeServerFile(blob: Blob) {
+  serverSttTranscribing.value = true
+  interimText.value = '转写中...'
+  try {
+    const file = new File([blob], 'recording.webm', { type: blob.type })
+    const lang = sttLang.value.split('-')[0] // "zh-CN" → "zh"
+    const { data } = await sttApi.transcribe(file, {
+      model: sttModel.value || undefined,
+      language: lang,
+    })
+    if (data.error) {
+      message.error('STT 错误: ' + data.error)
+    } else if (data.text) {
+      transcripts.value.push({
+        time: new Date().toLocaleTimeString(),
+        text: data.text,
+        confidence: -1,
+        source: `server:${data.model || 'unknown'} (${data.duration_ms}ms)`,
+      })
+    }
+  } catch (e: any) {
+    message.error('转写失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    serverSttTranscribing.value = false
+    interimText.value = ''
+  }
+}
+
+// Server STT (streaming): server-side mic → SSE events
+function startServerSttStream() {
+  if (sourceMode.value !== 'server') {
+    message.warning('服务端流式 STT 需要使用服务端音频源')
+    return
+  }
+  const device = selectedServerAudioIdx.value >= 0 ? selectedServerAudioIdx.value : undefined
+  const lang = sttLang.value.split('-')[0]
+  const url = sttApi.transcribeStreamUrl({
+    device,
+    model: sttModel.value || undefined,
+    language: lang,
+    samplerate: 16000,
+    duration: 60,
+  })
+  serverSttEventSource = new EventSource(url)
+  serverSttStreaming.value = true
+  interimText.value = '等待录音开始...'
+
+  serverSttEventSource.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data)
+      if (data.type === 'recording') {
+        interimText.value = data.message || '录音中...'
+      } else if (data.type === 'partial') {
+        interimText.value = data.text || ''
+        // 也添加到历史
+        transcripts.value.push({
+          time: new Date().toLocaleTimeString(),
+          text: data.text,
+          confidence: -1,
+          source: 'server-stream',
+        })
+      } else if (data.type === 'final') {
+        interimText.value = ''
+        if (data.text) {
+          transcripts.value.push({
+            time: new Date().toLocaleTimeString(),
+            text: data.text,
+            confidence: -1,
+            source: 'server-stream:final',
+          })
+        }
+        stopServerSttStream()
+      } else if (data.type === 'error') {
+        message.error('流式 STT 错误: ' + data.error)
+      } else if (data.type === 'done') {
+        stopServerSttStream()
+      }
+    } catch {}
+  }
+  serverSttEventSource.onerror = () => {
+    stopServerSttStream()
+  }
+}
+
+function stopServerSttStream() {
+  if (serverSttEventSource) {
+    serverSttEventSource.close()
+    serverSttEventSource = null
+  }
+  serverSttStreaming.value = false
+  interimText.value = ''
+}
 
 // ═══════════════════════════════════════════════════
 // CAMERA — Unified computed views
@@ -976,6 +1284,13 @@ function takeBrowserSnapshot() {
 // ═══════════════════════════════════════════════════
 onMounted(() => {
   initSTT()
+  // Load server STT status & models
+  loadSttStatus()
+  loadSttModels()
+  // Auto refresh audio devices on mount if audio is active
+  if (activeCategory.value === 'audio') {
+    audioRefreshDevices()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1112,7 +1427,7 @@ onBeforeUnmount(() => {
 .meter-label { font-size: 11px; color: #aaa; white-space: nowrap; }
 .meter-bg { flex: 1; height: 7px; background: #333; border-radius: 4px; overflow: hidden; }
 .meter-bar { height: 100%; border-radius: 4px; transition: width .08s; }
-.meter-val { font-size: 11px; color: #ccc; width: 40px; text-align: right; }
+.meter-val { font-size: 11px; color: #ccc; width: 98px; text-align: right; }
 
 /* ─── Waveform ─── */
 .wave-canvas { width: 100%; height: 120px; border-radius: 8px; background: #1a1a1a; }

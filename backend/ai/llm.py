@@ -39,6 +39,7 @@ from .providers.base import (
 from .providers.github_models import GitHubModelsProvider, _parse_error_meta
 from .providers.copilot import CopilotProvider
 from .providers.openai_compat import OpenAICompatProvider
+from .providers.antigravity import AntigravityProvider
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ _REASONING_MODEL_PREFIXES = ("o1", "o3", "o4")
 
 # Copilot 前缀
 COPILOT_PREFIX = "copilot:"
+
+# Anti-Gravity 前缀
+ANTIGRAVITY_PREFIX = "antigravity:"
 
 
 def _is_reasoning_model(model: str) -> bool:
@@ -119,8 +123,8 @@ class LLMClient:
           - "copilot:gpt-4o"        → Copilot API
           - "deepseek:deepseek-chat" → 第三方 (DB 查询)
         """
-        from studio.backend.core.config import settings
-        from studio.backend.services.copilot_auth import COPILOT_CHAT_URL
+        from backend.core.config import settings
+        from backend.services.copilot_auth import COPILOT_CHAT_URL
 
         now = time.time()
         cache_stale = (now - self._provider_cache_ts) > self._CACHE_TTL
@@ -139,6 +143,21 @@ class LLMClient:
                 self._provider_cache_ts = now
             return self._providers[cache_key], actual
 
+        # Anti-Gravity
+        if model_id.startswith(ANTIGRAVITY_PREFIX):
+            actual = model_id[len(ANTIGRAVITY_PREFIX):]
+            cache_key = "antigravity"
+            if cache_key not in self._providers or cache_stale:
+                from backend.services.antigravity_auth import ANTIGRAVITY_BASE_URL
+                info = ProviderInfo(
+                    provider_type="antigravity", slug="antigravity",
+                    actual_model=actual, base_url=ANTIGRAVITY_BASE_URL,
+                    icon="🚀", name="Anti-Gravity",
+                )
+                self._providers[cache_key] = AntigravityProvider(info)
+                self._provider_cache_ts = now
+            return self._providers[cache_key], actual
+
         # 第三方: slug:model 格式
         if ":" in model_id:
             slug, actual = model_id.split(":", 1)
@@ -147,7 +166,7 @@ class LLMClient:
             if cache_key in self._providers and not cache_stale:
                 return self._providers[cache_key], actual
 
-            from studio.backend.api.provider_api import get_provider_by_slug
+            from backend.api.provider_api import get_provider_by_slug
             provider_row = await get_provider_by_slug(slug)
             if provider_row and provider_row.enabled:
                 info = ProviderInfo(
@@ -168,7 +187,7 @@ class LLMClient:
         # 默认: GitHub Models
         cache_key = "github"
         if cache_key not in self._providers or cache_stale:
-            from studio.backend.api.provider_api import get_provider_by_slug
+            from backend.api.provider_api import get_provider_by_slug
             provider_row = await get_provider_by_slug("github")
             api_key = ((provider_row.api_key if provider_row else "") or settings.github_token or "").strip()
             info = ProviderInfo(
@@ -373,7 +392,7 @@ class LLMClient:
     def _check_auth(self, provider: BaseProvider, model: str) -> str:
         """检查认证状态, 返回错误消息或空字符串"""
         if isinstance(provider, CopilotProvider):
-            from studio.backend.services.copilot_auth import copilot_auth
+            from backend.services.copilot_auth import copilot_auth
             if not copilot_auth.is_authenticated:
                 return "❌ 未授权 Copilot，请在设置页面完成 OAuth 授权"
         elif isinstance(provider, GitHubModelsProvider):

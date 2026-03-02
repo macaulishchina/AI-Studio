@@ -53,5 +53,5 @@ async def get_db():
 async def init_db():
     """初始化数据库表"""
     async with engine.begin() as conn:
-        from studio.backend.models import Base as ModelBase  # noqa
+        from backend.models import Base as ModelBase  # noqa
         await conn.run_sync(ModelBase.metadata.create_all)

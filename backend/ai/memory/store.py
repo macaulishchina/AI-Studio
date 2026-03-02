@@ -115,7 +115,7 @@ class SQLiteMemoryStore(BaseMemoryStore):
         self._initialized = True
 
     async def _get_session(self):
-        from studio.backend.core.database import async_session_maker
+        from backend.core.database import async_session_maker
         return async_session_maker()
 
     async def add(self, item: MemoryItem) -> str:

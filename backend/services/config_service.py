@@ -1,18 +1,30 @@
 """
-系统级配置服务 — 统一管理 github_token 等系统凭据
+系统级配置服务 — 统一管理 github_token / 模型设置 等系统凭据
 
 核心原则:
-  - 唯一写入入口: 所有修改 github_token 的操作都通过此服务
+  - 唯一写入入口: 所有修改 github_token / 模型设置 的操作都通过此服务
   - 持久化到 studio_config 表 (重启后仍有效)
   - 同步更新 settings 运行时对象
   - 同步更新 AIProvider.api_key (github slug) 保持一致
 """
+import json
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text, select
 
 logger = logging.getLogger(__name__)
+
+# ── 模型设置相关 config key ──
+MODEL_CONFIG_KEYS = {
+    "chat_default_model",       # str: 全局默认聊天模型 ID
+    "chat_model_allowlist",     # JSON array: 聊天模型白名单
+    "stt_default_model",        # str: 全局默认 STT 模型 ID
+    "stt_model_allowlist",      # JSON array: STT 模型白名单
+    "stt_provider",             # str: STT 提供商 (browser / openai_compat / ...)
+    "stt_api_base",             # str: STT API base URL (OpenAI-compat)
+    "stt_api_key",              # str: STT API key
+}
 
 
 def _mask_token(t: str) -> str:
@@ -31,9 +43,9 @@ async def set_github_token(token: str) -> dict:
       2. settings.github_token (运行时)
       3. AIProvider(slug='github').api_key (保持 provider 列表一致)
     """
-    from studio.backend.core.config import settings
-    from studio.backend.core.database import async_session_maker
-    from studio.backend.models import AIProvider
+    from backend.core.config import settings
+    from backend.core.database import async_session_maker
+    from backend.models import AIProvider
 
     token = token.strip()
     settings.github_token = token
@@ -69,9 +81,128 @@ async def clear_github_token() -> dict:
 
 async def get_github_token_status() -> dict:
     """获取系统级 GitHub Token 配置状态"""
-    from studio.backend.core.config import settings
+    from backend.core.config import settings
     token = settings.github_token or ""
     return {
         "configured": bool(token),
         "masked_token": _mask_token(token),
     }
+
+
+# ── 模型设置管理 ────────────────────────────────────────────────
+
+async def get_model_settings() -> Dict[str, Any]:
+    """获取所有模型相关配置 (chat / stt)"""
+    from backend.core.database import async_session_maker
+
+    result: Dict[str, Any] = {}
+    try:
+        async with async_session_maker() as db:
+            placeholders = ", ".join(f"'{k}'" for k in MODEL_CONFIG_KEYS)
+            rows = (await db.execute(
+                text(f"SELECT key, value FROM studio_config WHERE key IN ({placeholders})")
+            )).all()
+            for key, value in rows:
+                if key.endswith("_allowlist"):
+                    # JSON array
+                    try:
+                        result[key] = json.loads(value) if value else []
+                    except (json.JSONDecodeError, TypeError):
+                        result[key] = []
+                else:
+                    result[key] = value or ""
+    except Exception as e:
+        logger.debug(f"get_model_settings 跳过: {e}")
+
+    # 确保所有 key 都有默认值
+    for key in MODEL_CONFIG_KEYS:
+        if key not in result:
+            result[key] = [] if key.endswith("_allowlist") else ""
+    return result
+
+
+async def set_model_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """批量更新模型相关配置
+
+    Args:
+        updates: { key: value } 字典, key 必须在 MODEL_CONFIG_KEYS 中
+
+    Returns:
+        更新后的完整模型配置
+    """
+    from backend.core.database import async_session_maker
+
+    # 过滤只允许的 key
+    valid_updates = {k: v for k, v in updates.items() if k in MODEL_CONFIG_KEYS}
+    if not valid_updates:
+        return await get_model_settings()
+
+    async with async_session_maker() as db:
+        for key, value in valid_updates.items():
+            # JSON array 类型序列化
+            if key.endswith("_allowlist"):
+                if isinstance(value, list):
+                    db_value = json.dumps(value, ensure_ascii=False)
+                elif isinstance(value, str):
+                    db_value = value  # 前端可能直接传 JSON string
+                else:
+                    db_value = "[]"
+            elif key == "stt_api_key":
+                db_value = (value or "").strip()
+            else:
+                db_value = str(value).strip() if value else ""
+
+            await db.execute(text(
+                "INSERT INTO studio_config (key, value, updated_at) VALUES (:k, :v, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = :v, updated_at = CURRENT_TIMESTAMP"
+            ), {"k": key, "v": db_value})
+
+        await db.commit()
+
+    logger.info(f"模型配置已更新: {list(valid_updates.keys())}")
+    return await get_model_settings()
+
+
+async def get_chat_default_model() -> str:
+    """获取全局默认聊天模型 (快捷方法, 供 discussion / conversation fallback 用)"""
+    from backend.core.database import async_session_maker
+    try:
+        async with async_session_maker() as db:
+            row = (await db.execute(
+                text("SELECT value FROM studio_config WHERE key = 'chat_default_model'")
+            )).first()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    return ""  # 空 = 使用硬编码 fallback
+
+
+async def get_stt_config() -> Dict[str, Any]:
+    """获取 STT 相关配置 (provider / api_base / api_key / model)"""
+    from backend.core.database import async_session_maker
+    stt_keys = {"stt_default_model", "stt_model_allowlist", "stt_provider", "stt_api_base", "stt_api_key"}
+    result: Dict[str, Any] = {}
+    try:
+        async with async_session_maker() as db:
+            placeholders = ", ".join(f"'{k}'" for k in stt_keys)
+            rows = (await db.execute(
+                text(f"SELECT key, value FROM studio_config WHERE key IN ({placeholders})")
+            )).all()
+            for key, value in rows:
+                if key.endswith("_allowlist"):
+                    try:
+                        result[key] = json.loads(value) if value else []
+                    except (json.JSONDecodeError, TypeError):
+                        result[key] = []
+                elif key == "stt_api_key":
+                    result[key] = value or ""
+                else:
+                    result[key] = value or ""
+    except Exception as e:
+        logger.debug(f"get_stt_config 跳过: {e}")
+
+    for key in stt_keys:
+        if key not in result:
+            result[key] = [] if key.endswith("_allowlist") else ""
+    return result

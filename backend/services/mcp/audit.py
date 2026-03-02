@@ -73,8 +73,8 @@ async def log_mcp_call(
 ):
     """记录 MCP 工具调用到数据库"""
     try:
-        from studio.backend.core.database import async_session_maker
-        from studio.backend.models import MCPAuditLog
+        from backend.core.database import async_session_maker
+        from backend.models import MCPAuditLog
 
         async with async_session_maker() as db:
             log = MCPAuditLog(

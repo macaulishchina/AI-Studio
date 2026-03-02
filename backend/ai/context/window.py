@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from studio.backend.core.model_capabilities import capability_cache
-from studio.backend.core.token_utils import (
+from backend.core.model_capabilities import capability_cache
+from backend.core.token_utils import (
     estimate_tokens,
     estimate_messages_tokens,
     truncate_text,
@@ -165,7 +165,7 @@ async def _generate_summary(
 ) -> Optional[str]:
     """用 AI 生成对话摘要"""
     try:
-        from studio.backend.ai.llm import get_llm_client
+        from backend.ai.llm import get_llm_client
 
         # 准备摘要材料
         text_parts = []

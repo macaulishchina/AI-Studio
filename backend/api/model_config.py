@@ -14,9 +14,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, delete as sa_delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db
-from studio.backend.models import CustomModel, ModelCapabilityOverride
-from studio.backend.core.model_capabilities import capability_cache
+from backend.core.database import get_db
+from backend.models import CustomModel, ModelCapabilityOverride
+from backend.core.model_capabilities import capability_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/model-config", tags=["Model Config"])
@@ -448,7 +448,7 @@ async def get_merged_model_capabilities(
     获取所有模型的合并能力视图 (模型列表 + 能力覆盖 + 自动检测值)。
     前端管理界面使用此接口展示完整数据。
     """
-    from studio.backend.api.models_api import _model_cache
+    from backend.api.models_api import _model_cache
 
     try:
         models = await _model_cache.get_models()
@@ -517,7 +517,7 @@ def _sync_override_to_cache(clean_name: str, override: ModelCapabilityOverride):
 async def _invalidate_model_cache():
     """使模型缓存过期, 下次请求时重新拉取"""
     try:
-        from studio.backend.api.models_api import _model_cache
+        from backend.api.models_api import _model_cache
         _model_cache._last_fetch = 0  # 强制过期
     except Exception:
         pass
@@ -525,7 +525,7 @@ async def _invalidate_model_cache():
 
 async def load_capability_overrides_to_cache():
     """启动时从 DB 加载所有能力覆盖到内存缓存 (在 lifespan 中调用)"""
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     try:
         async with async_session_maker() as db:
             result = await db.execute(select(ModelCapabilityOverride))

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from studio.backend.ai.skills.engine import SkillSpec
+from backend.ai.skills.engine import SkillSpec
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +181,8 @@ async def load_skills_for_role(
     Returns:
         SkillSpec 列表
     """
-    from studio.backend.core.database import async_session_maker
-    from studio.backend.models import Skill, Role
+    from backend.core.database import async_session_maker
+    from backend.models import Skill, Role
     from sqlalchemy import select
 
     ids_to_load = list(skill_ids or [])
@@ -211,8 +211,8 @@ async def list_available_skills(
     enabled_only: bool = True,
 ) -> List[SkillSpec]:
     """获取所有可用技能"""
-    from studio.backend.core.database import async_session_maker
-    from studio.backend.models import Skill
+    from backend.core.database import async_session_maker
+    from backend.models import Skill
     from sqlalchemy import select
 
     async with async_session_maker() as session:

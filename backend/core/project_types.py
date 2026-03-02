@@ -81,7 +81,7 @@ PROJECT_TYPES = _FALLBACK_PROJECT_TYPES
 def _get_effective_types() -> Dict[str, Dict[str, Any]]:
     """优先从 DB 工作流缓存获取, 回退到硬编码"""
     try:
-        from studio.backend.api.workflows import get_workflow_cache
+        from backend.api.workflows import get_workflow_cache
         cache = get_workflow_cache()
         if cache:
             return cache

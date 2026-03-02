@@ -8,11 +8,11 @@ RAG (Retrieval-Augmented Generation) 子系统
   - retriever: 检索器 (向量 + 关键词 + 混合)
   - indexer: 后台索引器 (工作区自动扫描)
 """
-from studio.backend.ai.rag.embeddings import EmbeddingService, get_embedding_service
-from studio.backend.ai.rag.chunker import CodeChunker, TextChunker, Chunk
-from studio.backend.ai.rag.index import VectorIndex, IndexEntry, get_vector_index
-from studio.backend.ai.rag.retriever import RAGRetriever, RetrievalResult, get_retriever
-from studio.backend.ai.rag.indexer import BackgroundIndexer, get_indexer
+from backend.ai.rag.embeddings import EmbeddingService, get_embedding_service
+from backend.ai.rag.chunker import CodeChunker, TextChunker, Chunk
+from backend.ai.rag.index import VectorIndex, IndexEntry, get_vector_index
+from backend.ai.rag.retriever import RAGRetriever, RetrievalResult, get_retriever
+from backend.ai.rag.indexer import BackgroundIndexer, get_indexer
 
 __all__ = [
     "EmbeddingService", "get_embedding_service",

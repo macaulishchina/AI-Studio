@@ -12,8 +12,8 @@ from typing import Optional, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings
-from studio.backend.models import Snapshot
+from backend.core.config import settings
+from backend.models import Snapshot
 
 logger = logging.getLogger(__name__)
 

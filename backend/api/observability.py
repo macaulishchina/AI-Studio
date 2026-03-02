@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
-from studio.backend.core.security import get_studio_user
+from backend.core.security import get_studio_user
 
 router = APIRouter(prefix="/studio-api/observability", tags=["observability"])
 
@@ -20,7 +20,7 @@ async def get_traces(
     _user=Depends(get_studio_user),
 ):
     """获取最近的 AI 调用 trace"""
-    from studio.backend.ai.observability.tracer import get_tracer
+    from backend.ai.observability.tracer import get_tracer
     tracer = get_tracer()
     return {"traces": tracer.get_recent(limit, project_id)}
 
@@ -31,7 +31,7 @@ async def get_trace_stats(
     _user=Depends(get_studio_user),
 ):
     """获取 trace 汇总统计"""
-    from studio.backend.ai.observability.tracer import get_tracer
+    from backend.ai.observability.tracer import get_tracer
     tracer = get_tracer()
     return tracer.get_stats(project_id)
 
@@ -42,7 +42,7 @@ async def get_metrics_dashboard(
     _user=Depends(get_studio_user),
 ):
     """获取指标仪表盘数据"""
-    from studio.backend.ai.observability.metrics import get_metrics
+    from backend.ai.observability.metrics import get_metrics
     metrics = get_metrics()
     return metrics.get_dashboard_data(project_id)
 
@@ -54,7 +54,7 @@ async def get_budget_status(
     _user=Depends(get_studio_user),
 ):
     """获取预算使用情况"""
-    from studio.backend.ai.observability.budget import get_budget_manager
+    from backend.ai.observability.budget import get_budget_manager
     mgr = get_budget_manager()
 
     check = mgr.check_budget(
@@ -73,8 +73,8 @@ async def get_budget_status(
 @router.get("/rag/status")
 async def get_rag_status(_user=Depends(get_studio_user)):
     """获取 RAG 索引状态"""
-    from studio.backend.ai.rag.index import get_vector_index
-    from studio.backend.ai.rag.indexer import get_indexer
+    from backend.ai.rag.index import get_vector_index
+    from backend.ai.rag.indexer import get_indexer
 
     index = get_vector_index()
     indexer = get_indexer()
@@ -89,7 +89,7 @@ async def get_rag_status(_user=Depends(get_studio_user)):
 @router.post("/rag/reindex")
 async def trigger_reindex(_user=Depends(get_studio_user)):
     """手动触发重新索引"""
-    from studio.backend.ai.rag.indexer import get_indexer
+    from backend.ai.rag.indexer import get_indexer
     indexer = get_indexer()
     stats = await indexer.index_once()
     return {"status": "ok", "stats": stats}
@@ -103,7 +103,7 @@ async def get_memory_items(
     _user=Depends(get_studio_user),
 ):
     """获取记忆项列表"""
-    from studio.backend.ai.memory.store import get_memory_store, MemoryType
+    from backend.ai.memory.store import get_memory_store, MemoryType
 
     store = get_memory_store()
     mtype = MemoryType(memory_type) if memory_type else None
@@ -135,7 +135,7 @@ async def delete_memory_item(
     _user=Depends(get_studio_user),
 ):
     """删除记忆项"""
-    from studio.backend.ai.memory.store import get_memory_store
+    from backend.ai.memory.store import get_memory_store
     store = get_memory_store()
     removed = await store.remove(memory_id)
     return {"removed": removed}

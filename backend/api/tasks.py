@@ -19,10 +19,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db
-from studio.backend.core.security import get_optional_studio_user
-from studio.backend.models import AiTask
-from studio.backend.services.task_runner import TaskManager, ProjectEventBus
+from backend.core.database import get_db
+from backend.core.security import get_optional_studio_user
+from backend.models import AiTask
+from backend.services.task_runner import TaskManager, ProjectEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -333,4 +333,4 @@ async def approve_command(
 
 
 # 需要在 tasks.py 模块中也能用 async_session_maker
-from studio.backend.core.database import async_session_maker
+from backend.core.database import async_session_maker

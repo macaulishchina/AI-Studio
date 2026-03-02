@@ -28,7 +28,7 @@ import re as _re
 import time
 from typing import List, Dict, Any, Optional, AsyncGenerator, Callable, Awaitable
 
-from studio.backend.ai.llm import (
+from backend.ai.llm import (
     LLMClient,
     LLMEvent,
     get_llm_client,
@@ -38,8 +38,8 @@ from studio.backend.ai.llm import (
     _is_reasoning_model,
     COPILOT_PREFIX,
 )
-from studio.backend.core.model_capabilities import capability_cache
-from studio.backend.core.token_utils import estimate_tokens, estimate_messages_tokens, truncate_text
+from backend.core.model_capabilities import capability_cache
+from backend.core.token_utils import estimate_tokens, estimate_messages_tokens, truncate_text
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +329,7 @@ async def chat_stream(
         else:
             # 无 tool calls — 检测伪造
             if response_has_content and tools and fabrication_retries < 2:
-                from studio.backend.api.command_auth import is_fabrication_detection_enabled
+                from backend.api.command_auth import is_fabrication_detection_enabled
                 if is_fabrication_detection_enabled():
                     full_text = "".join(response_text_parts)
                     if _detect_fabrication(full_text):

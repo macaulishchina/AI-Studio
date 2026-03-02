@@ -185,10 +185,11 @@ async def level_stream(
     _active_stream_stops.append(stop_event)
 
     async def _stream():
-        """SSE 事件生成器: 在线程中采集音频, 异步推送电平"""
+        """SSE 事件生成器: 使用 callback + asyncio queue 采集音频, 避免阻塞 read 竞态"""
         loop = asyncio.get_event_loop()
         block_size = int(samplerate * interval_ms / 1000)
         stream = None
+        events: asyncio.Queue[dict] = asyncio.Queue(maxsize=8)
 
         try:
             # 验证设备
@@ -200,66 +201,65 @@ async def level_stream(
                     yield f"data: {msg}\n\n"
                     return
 
+            def _audio_callback(indata, frames, callback_time, status):
+                if stop_event.is_set():
+                    return
+                try:
+                    frame_data = _np.array(indata, copy=True)
+
+                    rms = float(_np.sqrt(_np.mean(frame_data ** 2)))
+                    peak = float(_np.max(_np.abs(frame_data)))
+                    rms_db = float(20 * _np.log10(rms + 1e-10))
+                    peak_db = float(20 * _np.log10(peak + 1e-10))
+                    rms_pct = max(0.0, min(100.0, (rms_db + 60) / 60 * 100))
+
+                    flat = frame_data[:, 0] if frame_data.ndim > 1 else frame_data
+                    waveform_step = max(1, len(flat) // 100)
+                    waveform = flat[::waveform_step].astype(float).tolist()
+
+                    payload = {
+                        "rms": round(rms, 6),
+                        "peak": round(peak, 6),
+                        "rms_db": round(rms_db, 1),
+                        "peak_db": round(peak_db, 1),
+                        "rms_pct": round(rms_pct, 1),
+                        "waveform": waveform,
+                        "overflowed": bool(getattr(status, "input_overflow", False)),
+                        "ts": round(time.time(), 3),
+                    }
+
+                    def _enqueue():
+                        if events.full():
+                            try:
+                                events.get_nowait()
+                            except asyncio.QueueEmpty:
+                                pass
+                        events.put_nowait(payload)
+
+                    loop.call_soon_threadsafe(_enqueue)
+                except Exception:
+                    pass
+
             stream = _sd.InputStream(
                 device=device,
                 samplerate=samplerate,
                 channels=channels,
                 blocksize=block_size,
                 dtype="float32",
+                callback=_audio_callback,
             )
             stream.start()
 
             yield f"data: {json.dumps({'event': 'started', 'device': device, 'samplerate': samplerate, 'blocksize': block_size})}\n\n"
 
-            def _blocking_read():
-                """在线程池中读取音频块, 可被 stop_event 中断"""
-                try:
-                    if stop_event.is_set():
-                        return None
-                    return stream.read(block_size)
-                except Exception:
-                    return None
-
             while not stop_event.is_set():
-                # 在线程池中读取音频块 (阻塞 I/O)
                 try:
-                    result = await asyncio.wait_for(
-                        loop.run_in_executor(None, _blocking_read),
-                        timeout=2.0,
-                    )
+                    payload = await asyncio.wait_for(events.get(), timeout=2.0)
                 except asyncio.TimeoutError:
-                    # 读取超时, 检查是否需要停止
                     if stop_event.is_set():
                         break
                     continue
-
-                if result is None:
-                    break
-                data, overflowed = result
-
-                rms = float(_np.sqrt(_np.mean(data ** 2)))
-                peak = float(_np.max(_np.abs(data)))
-
-                # dBFS
-                rms_db = float(20 * _np.log10(rms + 1e-10))
-                peak_db = float(20 * _np.log10(peak + 1e-10))
-
-                # 归一化百分比 (0-100, 基于 -60dB ~ 0dB 范围)
-                rms_pct = max(0.0, min(100.0, (rms_db + 60) / 60 * 100))
-
-                payload = {
-                    "rms": round(rms, 6),
-                    "peak": round(peak, 6),
-                    "rms_db": round(rms_db, 1),
-                    "peak_db": round(peak_db, 1),
-                    "rms_pct": round(rms_pct, 1),
-                    "overflowed": overflowed,
-                    "ts": round(time.time(), 3),
-                }
                 yield f"data: {json.dumps(payload)}\n\n"
-
-                # 小延迟让事件循环呼吸
-                await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
             logger.info("音量流被客户端关闭")
@@ -272,7 +272,8 @@ async def level_stream(
                 _active_stream_stops.remove(stop_event)
             if stream is not None:
                 try:
-                    stream.abort()   # abort() 立即停止, 不等缓冲区排空
+                    if getattr(stream, "active", False):
+                        stream.stop()
                     stream.close()
                 except Exception:
                     pass
@@ -351,7 +352,7 @@ async def test_capture(
 @router.post("/record-audio")
 async def record_audio(
     device: Optional[int] = Query(None),
-    duration: float = Query(2.0, ge=0.5, le=30.0, description="录音时长 (秒)"),
+    duration: float = Query(30.0, ge=0.5, le=600.0, description="录音时长 (秒)"),
     samplerate: int = Query(16000),
     channels: int = Query(1),
 ):
@@ -368,6 +369,8 @@ async def record_audio(
     loop = asyncio.get_event_loop()
 
     try:
+        logger.info(f"开始录音: device={device}, duration={duration}, samplerate={samplerate}")
+        
         def _record():
             return _sd.rec(
                 int(samplerate * duration),
@@ -377,8 +380,21 @@ async def record_audio(
                 device=device,
             )
 
-        recording = await loop.run_in_executor(None, _record)
-        await loop.run_in_executor(None, _sd.wait)
+        # 添加超时控制，避免长时间阻塞
+        recording = await asyncio.wait_for(
+            loop.run_in_executor(None, _record),
+            timeout=duration + 5.0  # 录音时间 + 5秒缓冲
+        )
+        
+        logger.info(f"录音数据获取完成, 样本数: {len(recording)}")
+        
+        # 等待录音完成，同样添加超时
+        await asyncio.wait_for(
+            loop.run_in_executor(None, _sd.wait),
+            timeout=duration + 5.0
+        )
+        
+        logger.info("录音等待完成，开始处理数据")
 
         # 计算统计信息
         rms = float(_np.sqrt(_np.mean(recording ** 2)))

@@ -97,7 +97,7 @@ class RoleContextSource(BaseContextSource):
 
         # 5. 技能注入 (通过 SkillEngine 完整组装)
         if skills:
-            from studio.backend.ai.skills.engine import SkillSpec, get_skill_engine
+            from backend.ai.skills.engine import SkillSpec, get_skill_engine
             engine = get_skill_engine()
             specs = []
             for skill in skills:

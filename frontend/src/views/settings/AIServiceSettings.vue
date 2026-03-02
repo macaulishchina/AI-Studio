@@ -1,7 +1,7 @@
 <template>
   <n-space vertical :size="16">
     <n-alert type="info" :bordered="false">
-      配置 AI 模型服务提供商。GitHub Models 使用全局 Token（与工作目录无关），Copilot 通过 OAuth 授权，第三方提供商需要自行填写 API Key。
+      配置 AI 模型服务提供商。GitHub Models 使用全局 Token（与工作目录无关），Copilot / Anti-Gravity 通过 OAuth 授权，第三方提供商需要自行填写 API Key。
       启用后，其模型会自动出现在讨论和实施的模型下拉列表中。
     </n-alert>
 
@@ -18,6 +18,9 @@
                 <n-text strong>{{ p.name }}</n-text>
                 <n-tag :type="copilotStatus.authenticated ? 'success' : 'default'" size="small">
                   {{ copilotStatus.authenticated ? '已授权' : '未授权' }}
+                </n-tag>
+                <n-tag v-if="copilotUsage?.copilot_plan" size="small" type="info">
+                  {{ copilotUsage.copilot_plan }}
                 </n-tag>
               </n-space>
             </template>
@@ -95,7 +98,105 @@
               <template v-else>
                 <n-button @click="testCopilot" :loading="testingCopilot" size="small">🧪 测试</n-button>
                 <n-button @click="fetchCopilotUsage" :loading="loadingUsage" size="small">🔄 刷新配额</n-button>
+                <n-button @click="startAuth" :loading="authLoading" size="small">➕ 添加账号</n-button>
                 <n-button type="error" @click="logoutCopilot" size="small" ghost>🔓 注销</n-button>
+              </template>
+            </n-space>
+
+            <!-- 多账号切换 -->
+            <template v-if="copilotAccounts.length > 1 && copilotStatus.authenticated">
+              <div style="margin-top: 10px">
+                <n-space align="center" :size="8">
+                  <n-text depth="3" style="font-size: 12px">账号:</n-text>
+                  <n-select
+                    :value="copilotActiveAccountIndex"
+                    :options="copilotAccountOptions"
+                    size="small"
+                    style="width: 220px"
+                    @update:value="switchCopilotAccount"
+                  />
+                  <n-popconfirm @positive-click="removeCopilotAccount(copilotActiveAccountIndex)">
+                    <template #trigger>
+                      <n-button size="tiny" type="error" ghost :disabled="copilotAccounts.length <= 1">🗑️</n-button>
+                    </template>
+                    确认删除此 Copilot 账号？
+                  </n-popconfirm>
+                </n-space>
+              </div>
+            </template>
+          </n-card>
+
+          <!-- Anti-Gravity -->
+          <n-card v-else-if="p.slug === 'antigravity'" size="small" :style="cardStyle(p)">
+            <template #header>
+              <n-space align="center" :size="8">
+                <span v-html="getProviderIcon(p.slug, p.name, 20)" style="display:inline-flex"></span>
+                <n-text strong>{{ p.name }}</n-text>
+                <n-tag :type="agStatus.authenticated ? 'success' : 'default'" size="small">
+                  {{ agStatus.authenticated ? '已授权' : '未授权' }}
+                </n-tag>
+                <n-tag v-if="agUsage?.subscription" size="small" type="info">
+                  {{ agUsage.subscription }}
+                </n-tag>
+              </n-space>
+            </template>
+            <template #header-extra>
+              <n-switch :value="agStatus.authenticated" :disabled="true" size="small" />
+            </template>
+
+            <n-text depth="3" style="font-size: 12px">{{ p.description }}</n-text>
+
+            <!-- 使用信息 -->
+            <template v-if="agUsage && agStatus.authenticated">
+              <div style="margin-top: 12px">
+                <n-space align="center" :size="12" style="margin-bottom: 6px">
+                  <n-text strong style="font-size: 13px">📊 使用信息</n-text>
+                  <n-tag v-if="agUsage.user_email" size="small">{{ agUsage.user_email }}</n-tag>
+                </n-space>
+                <n-space vertical :size="4">
+                  <n-text depth="3" style="font-size: 12px">
+                    可用模型: {{ agUsage.available_models || 0 }} 个
+                  </n-text>
+                  <n-text depth="3" style="font-size: 12px">
+                    {{ agUsage.rate_limits?.description || '' }}
+                  </n-text>
+                  <n-text v-if="agUsage.rate_limits?.plan_details" depth="3" style="font-size: 12px">
+                    {{ agUsage.rate_limits.plan_details }}
+                  </n-text>
+                </n-space>
+              </div>
+            </template>
+
+            <!-- OAuth 流程 -->
+            <n-space style="margin-top: 12px">
+              <template v-if="!agStatus.authenticated">
+                <template v-if="agDeviceFlow.active">
+                  <n-card size="small" style="background: #1a2744; border: 1px solid #4098fc; width: 100%">
+                    <n-space vertical align="center" :size="8">
+                      <n-text>请访问以下网址并用 Google 账号登录授权:</n-text>
+                      <n-button tag="a" :href="agDeviceFlow.verification_url" target="_blank" type="info" size="small">
+                        {{ agDeviceFlow.verification_url }}
+                      </n-button>
+                      <n-space align="center">
+                        <n-text strong style="font-size: 22px; letter-spacing: 4px; font-family: monospace">
+                          {{ agDeviceFlow.user_code }}
+                        </n-text>
+                        <n-button size="tiny" @click="copyAgCode">📋</n-button>
+                      </n-space>
+                      <n-progress type="line" :percentage="agDeviceFlow.progress" :show-indicator="false" />
+                    </n-space>
+                  </n-card>
+                </template>
+                <template v-else>
+                  <n-button type="primary" @click="startAgAuth" :loading="agAuthLoading" size="small">
+                    🔐 绑定 Google 账号
+                  </n-button>
+                </template>
+              </template>
+              <template v-else>
+                <n-button @click="testAntigravity" :loading="testingAg" size="small">🧪 测试</n-button>
+                <n-button @click="fetchAgUsage" :loading="loadingAgUsage" size="small">🔄 刷新信息</n-button>
+                <n-button type="error" @click="logoutAntigravity" size="small" ghost>🔓 注销</n-button>
               </template>
             </n-space>
           </n-card>
@@ -271,7 +372,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { providerApi, copilotAuthApi, modelApi, systemApi } from '@/api'
+import { providerApi, copilotAuthApi, antigravityAuthApi, modelApi, systemApi } from '@/api'
 import { getProviderIcon } from '@/utils/providerIcons'
 
 const message = useMessage()
@@ -301,15 +402,16 @@ async function loadProviders() {
 }
 
 // 已配置: 内置 + 已填 API Key 的第三方
+const BUILTIN_SLUGS = ['copilot', 'github', 'antigravity']
 const configuredProviders = computed(() => {
-  const builtins = providers.value.filter((p: any) => p.slug === 'copilot' || p.slug === 'github')
-  const configured = providers.value.filter((p: any) => p.slug !== 'copilot' && p.slug !== 'github' && p.api_key_set)
+  const builtins = providers.value.filter((p: any) => BUILTIN_SLUGS.includes(p.slug))
+  const configured = providers.value.filter((p: any) => !BUILTIN_SLUGS.includes(p.slug) && p.api_key_set)
   return [...builtins, ...configured]
 })
 
 // 未配置: 第三方且未填 API Key
 const unconfiguredProviders = computed(() =>
-  providers.value.filter((p: any) => p.slug !== 'copilot' && p.slug !== 'github' && !p.api_key_set)
+  providers.value.filter((p: any) => !BUILTIN_SLUGS.includes(p.slug) && !p.api_key_set)
 )
 
 // 配额已用百分比
@@ -321,6 +423,7 @@ const quotaUsedPercent = computed(() => {
 
 function cardStyle(p: any) {
   if (p.slug === 'copilot' && copilotStatus.value.authenticated) return 'background: #212121; border-left: 3px solid #18a058'
+  if (p.slug === 'antigravity' && agStatus.value.authenticated) return 'background: #212121; border-left: 3px solid #fbbc04'
   if (p.slug === 'github') return 'background: #212121; border-left: 3px solid #4098fc'
   if (p.enabled && p.api_key_set) return 'background: #212121; border-left: 3px solid #18a058'
   return 'background: #212121; opacity: 0.8'
@@ -482,6 +585,17 @@ const copilotUsage = ref<any>(null)
 const loadingUsage = ref(false)
 const authLoading = ref(false)
 const testingCopilot = ref(false)
+
+// 多账号
+const copilotAccounts = ref<any[]>([])
+const copilotActiveAccountIndex = ref<number>(0)
+const copilotAccountOptions = computed(() => {
+  return copilotAccounts.value.map((a: any) => ({
+    label: `${a.label || a.github_user} (${a.token_hint})`,
+    value: a.index
+  }))
+})
+
 const deviceFlow = ref<any>({
   active: false,
   user_code: '',
@@ -493,11 +607,52 @@ const deviceFlow = ref<any>({
 let pollTimer: any = null
 let progressTimer: any = null
 
+async function loadCopilotAccounts() {
+  try {
+    const { data } = await copilotAuthApi.accounts()
+    copilotAccounts.value = data || []
+  } catch {}
+}
+
+async function switchCopilotAccount(index: number) {
+  try {
+    await copilotAuthApi.switchAccount(index)
+    copilotActiveAccountIndex.value = index
+    message.success('已切换 Copilot 账号')
+    await fetchCopilotStatus()
+    await modelApi.refresh()
+  } catch (e: any) {
+    message.error('切换账号失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+async function removeCopilotAccount(index: number) {
+  try {
+    const { data } = await copilotAuthApi.removeAccount(index)
+    message.success(`已删除 Copilot 账号 ${data.removed_label}`)
+    await fetchCopilotStatus()
+    await modelApi.refresh()
+  } catch (e: any) {
+    message.error('删除账号失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
 async function fetchCopilotStatus() {
   try {
     const { data } = await copilotAuthApi.status()
     copilotStatus.value = data
-    if (data.authenticated) fetchCopilotUsage()
+    if (data.authenticated) {
+      if (data.active_account && copilotAccounts.value.length) {
+        // 更新 active index based on the returned account index, assume index is matched in the array or it's implicitly index 0 if not
+        // A better way is to rely on active_index returned or just reload accounts
+      }
+      copilotActiveAccountIndex.value = data.account_count > 0 && data.active_account ? copilotAccounts.value.findIndex(a => a.github_user === data.active_account.github_user) : 0
+      // if not found, reset to 0
+      if (copilotActiveAccountIndex.value < 0) copilotActiveAccountIndex.value = 0
+
+      await loadCopilotAccounts()
+      fetchCopilotUsage()
+    }
   } catch {}
 }
 
@@ -582,8 +737,116 @@ async function logoutCopilot() {
     await copilotAuthApi.logout()
     copilotStatus.value = { authenticated: false }
     copilotUsage.value = null
+    copilotAccounts.value = []
     await modelApi.refresh()
     message.info('已注销 Copilot')
+  } catch {}
+}
+
+// ==================== Anti-Gravity OAuth ====================
+const agStatus = ref<any>({ authenticated: false })
+const agUsage = ref<any>(null)
+const loadingAgUsage = ref(false)
+const agAuthLoading = ref(false)
+const testingAg = ref(false)
+const agDeviceFlow = ref<any>({
+  active: false,
+  user_code: '',
+  verification_url: '',
+  progress: 0,
+})
+let agPollTimer: any = null
+let agProgressTimer: any = null
+
+async function fetchAgStatus() {
+  try {
+    const { data } = await antigravityAuthApi.status()
+    agStatus.value = data
+    if (data.authenticated) fetchAgUsage()
+  } catch {}
+}
+
+async function fetchAgUsage() {
+  loadingAgUsage.value = true
+  try {
+    const { data } = await antigravityAuthApi.usage()
+    agUsage.value = data
+  } catch {} finally {
+    loadingAgUsage.value = false
+  }
+}
+
+async function startAgAuth() {
+  agAuthLoading.value = true
+  try {
+    const { data } = await antigravityAuthApi.startDeviceFlow()
+    agDeviceFlow.value = {
+      active: true,
+      user_code: data.user_code,
+      verification_url: data.verification_url,
+      progress: 0,
+    }
+    startAgPolling()
+    const totalMs = (data.expires_in || 1800) * 1000
+    const startTime = Date.now()
+    agProgressTimer = setInterval(() => {
+      agDeviceFlow.value.progress = Math.min(100, ((Date.now() - startTime) / totalMs) * 100)
+    }, 1000)
+  } catch (e: any) {
+    message.error('启动授权失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    agAuthLoading.value = false
+  }
+}
+
+function startAgPolling() {
+  agPollTimer = setInterval(async () => {
+    try {
+      const { data } = await antigravityAuthApi.pollDeviceFlow()
+      if (data.status === 'success') {
+        stopAgPolling()
+        agDeviceFlow.value = { active: false }
+        await fetchAgStatus()
+        await modelApi.refresh()
+        message.success('🎉 Anti-Gravity 授权成功!')
+      } else if (data.status === 'expired') {
+        stopAgPolling()
+        agDeviceFlow.value = { active: false }
+        message.warning('授权码已过期，请重新开始')
+      }
+    } catch {}
+  }, 6000)
+}
+
+function stopAgPolling() {
+  if (agPollTimer) { clearInterval(agPollTimer); agPollTimer = null }
+  if (agProgressTimer) { clearInterval(agProgressTimer); agProgressTimer = null }
+}
+
+function copyAgCode() {
+  navigator.clipboard.writeText(agDeviceFlow.value.user_code)
+  message.success('已复制')
+}
+
+async function testAntigravity() {
+  testingAg.value = true
+  try {
+    const { data } = await antigravityAuthApi.test()
+    data.success ? message.success('✅ ' + data.message) : message.error('❌ ' + data.message)
+  } catch (e: any) {
+    message.error('测试失败')
+  } finally {
+    testingAg.value = false
+  }
+}
+
+async function logoutAntigravity() {
+  try {
+    await antigravityAuthApi.logout()
+    agStatus.value = { authenticated: false }
+    agUsage.value = null
+    await modelApi.refresh()
+    message.info('已注销 Anti-Gravity')
   } catch {}
 }
 
@@ -591,9 +854,11 @@ async function logoutCopilot() {
 onMounted(() => {
   loadProviders()
   fetchCopilotStatus()
+  fetchAgStatus()
 })
 
 onUnmounted(() => {
   stopPolling()
+  stopAgPolling()
 })
 </script>

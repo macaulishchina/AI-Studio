@@ -45,6 +45,19 @@ BUILTIN_PROVIDERS: List[Dict[str, Any]] = [
         "description": "GitHub Copilot API — 需要 Copilot Pro/Pro+ 订阅，通过 OAuth 设备流授权。支持 Claude, Gemini, Grok 等高级模型。",
         "default_models": [],
     },
+    {
+        "slug": "antigravity",
+        "name": "Anti-Gravity",
+        "provider_type": "antigravity",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key": "",  # 使用 Google OAuth Device Flow
+        "enabled": True,
+        "is_builtin": True,
+        "is_preset": False,
+        "icon": "🚀",
+        "description": "Google Anti-Gravity — AI 编程助手平台。通过 Google 账号 OAuth 授权，支持 Gemini, Claude, GPT 等模型。",
+        "default_models": [],
+    },
 ]
 
 

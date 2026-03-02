@@ -13,8 +13,8 @@ import os
 import logging
 from typing import Optional, Union, Tuple, List
 
-from studio.backend.core.config import settings
-from studio.backend.core.token_utils import estimate_tokens
+from backend.core.config import settings
+from backend.core.token_utils import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -471,7 +471,7 @@ def build_project_context(
                 f"System prompt ({current_tokens} tokens) 超出预算 ({budget_tokens}),"
                 f" 级别={level}, 进行截断"
             )
-            from studio.backend.core.token_utils import truncate_text
+            from backend.core.token_utils import truncate_text
             context = truncate_text(context, budget_tokens)
 
     if not return_sections:

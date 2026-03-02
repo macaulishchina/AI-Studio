@@ -105,7 +105,7 @@ class EmbeddingResult:
 @dataclass
 class ProviderInfo:
     """提供商解析后的元信息"""
-    provider_type: Literal["github_models", "copilot", "openai_compatible"]
+    provider_type: Literal["github_models", "copilot", "openai_compatible", "antigravity"]
     slug: str
     actual_model: str
     base_url: str

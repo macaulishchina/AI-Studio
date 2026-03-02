@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from studio.backend.ai.rag.index import VectorIndex, IndexEntry, get_vector_index
+from backend.ai.rag.index import VectorIndex, IndexEntry, get_vector_index
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class RAGRetriever:
     ) -> List[RetrievalResult]:
         """向量检索"""
         if self._embedder is None:
-            from studio.backend.ai.rag.embeddings import get_embedding_service
+            from backend.ai.rag.embeddings import get_embedding_service
             self._embedder = get_embedding_service()
 
         try:

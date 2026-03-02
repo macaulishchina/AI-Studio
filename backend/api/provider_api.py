@@ -12,10 +12,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from studio.backend.core.database import async_session_maker
-from studio.backend.core.config import settings
-from studio.backend.models import AIProvider
-from studio.backend.api.provider_presets import ALL_SEED_PROVIDERS
+from backend.core.database import async_session_maker
+from backend.core.config import settings
+from backend.models import AIProvider
+from backend.api.provider_presets import ALL_SEED_PROVIDERS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/providers", tags=["AI Providers"])
@@ -196,7 +196,7 @@ async def update_provider(slug: str, data: ProviderUpdate):
             provider.api_key = data.api_key
             # GitHub Models 作为“全局 AI Token”来源，通过统一配置服务同步
             if provider.slug == "github":
-                from studio.backend.services.config_service import set_github_token
+                from backend.services.config_service import set_github_token
                 await set_github_token(data.api_key)
         if data.enabled is not None:
             provider.enabled = data.enabled
@@ -248,6 +248,8 @@ async def test_provider(slug: str):
         return await _test_github_models(provider)
     elif provider.provider_type == "copilot":
         return await _test_copilot(provider)
+    elif provider.provider_type == "antigravity":
+        return await _test_antigravity(provider)
     else:
         return await _test_openai_compatible(provider)
 
@@ -331,7 +333,7 @@ async def _test_github_models(provider: AIProvider) -> dict:
 
 async def _test_copilot(provider: AIProvider) -> dict:
     """测试 Copilot API"""
-    from studio.backend.services.copilot_auth import copilot_auth
+    from backend.services.copilot_auth import copilot_auth
     if not copilot_auth.is_authenticated:
         return {"success": False, "message": "Copilot 未授权，请先完成 OAuth 认证"}
 
@@ -350,6 +352,31 @@ async def _test_copilot(provider: AIProvider) -> dict:
             )
             if resp.status_code == 200:
                 return {"success": True, "message": "Copilot 连接正常"}
+            else:
+                return {"success": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"success": False, "message": f"连接失败: {str(e)}"}
+
+
+async def _test_antigravity(provider: AIProvider) -> dict:
+    """测试 Anti-Gravity API"""
+    from backend.services.antigravity_auth import antigravity_auth
+    if not antigravity_auth.is_authenticated:
+        return {"success": False, "message": "Anti-Gravity 未授权，请先完成 Google 账号授权"}
+
+    try:
+        access_token = await antigravity_auth.ensure_token()
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{provider.base_url}/models",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                model_count = len(data.get("data", []))
+                return {"success": True, "message": f"Anti-Gravity 连接正常, 发现 {model_count} 个模型"}
             else:
                 return {"success": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:

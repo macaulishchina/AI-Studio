@@ -12,8 +12,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-from studio.backend.core.config import settings
-from studio.backend.core.security import (
+from backend.core.config import settings
+from backend.core.security import (
     verify_admin,
     verify_main_project_token,
     create_studio_token,

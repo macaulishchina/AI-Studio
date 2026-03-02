@@ -57,8 +57,8 @@ class MCPServerRegistry:
     async def load_from_db(self):
         """从 DB 加载所有 MCP Server 配置到内存"""
         try:
-            from studio.backend.core.database import async_session_maker
-            from studio.backend.models import MCPServer
+            from backend.core.database import async_session_maker
+            from backend.models import MCPServer
             from sqlalchemy import select
 
             async with async_session_maker() as db:

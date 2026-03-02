@@ -25,8 +25,8 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import async_session_maker
-from studio.backend.models import (
+from backend.core.database import async_session_maker
+from backend.models import (
     AiTask, Message, MessageRole, MessageType, Project, ProjectStatus, Role, Conversation,
 )
 
@@ -212,13 +212,13 @@ class RunningTask:
 
         返回 {"approved": bool, "scope": "once"|"session"|"project"|"permanent"}
         """
-        from studio.backend.api.command_auth import match_command_rule, log_command_audit
+        from backend.api.command_auth import match_command_rule, log_command_audit
 
         # 获取项目标题用于审计日志
         project_title = ""
         try:
-            from studio.backend.core.database import async_session_maker
-            from studio.backend.models import Project
+            from backend.core.database import async_session_maker
+            from backend.models import Project
             async with async_session_maker() as _db:
                 _r = await _db.execute(select(Project.title).where(Project.id == self.project_id))
                 project_title = _r.scalar_one_or_none() or ""
@@ -310,8 +310,8 @@ class RunningTask:
             all_commands: 如果为 True, 使用 * 通配符匹配所有命令
         """
         try:
-            from studio.backend.core.database import async_session_maker
-            from studio.backend.models import CommandAuthRule
+            from backend.core.database import async_session_maker
+            from backend.models import CommandAuthRule
 
             # 如果 all_commands=True, 使用 * 通配符; 否则智能提取命令名
             pattern = "*" if all_commands else _extract_command_pattern(command)
@@ -557,7 +557,7 @@ class TaskManager:
         regenerate: bool = False,
     ) -> int:
         """创建对话 AI 任务 (不绑定项目) 并启动后台执行, 返回 task_id"""
-        from studio.backend.models import Conversation
+        from backend.models import Conversation
         async with async_session_maker() as db:
             task = AiTask(
                 conversation_id=conversation_id,
@@ -669,19 +669,19 @@ async def _execute_discussion(
     后台执行讨论 AI — 从 discussion.py event_stream() 提取的核心逻辑.
     在 asyncio.Task 中运行, 不依赖 HTTP 连接.
     """
-    from studio.backend.services import ai_service, context_service
-    from studio.backend.services.ai_service import new_request_id
-    from studio.backend.services.context_manager import (
+    from backend.services import ai_service, context_service
+    from backend.services.ai_service import new_request_id
+    from backend.services.context_manager import (
         prepare_context, build_usage_summary,
         summarize_context_if_needed, _generate_summary,
     )
-    from studio.backend.services.tool_registry import (
+    from backend.services.tool_registry import (
         get_tool_definitions, execute_tool,
     )
-    from studio.backend.core.model_capabilities import capability_cache
-    from studio.backend.core.token_utils import estimate_tokens, truncate_text
-    from studio.backend.core.config import settings
-    from studio.backend.core.project_types import get_role_for_status, get_ui_labels
+    from backend.core.model_capabilities import capability_cache
+    from backend.core.token_utils import estimate_tokens, truncate_text
+    from backend.core.config import settings
+    from backend.core.project_types import get_role_for_status, get_ui_labels
 
     # 更新 DB 状态 → running
     await _update_task_status(rt.task_id, "running")
@@ -749,7 +749,7 @@ async def _execute_discussion(
             # ---- 加载活跃技能 ----
             active_skills = []
             if role_obj and role_obj.default_skills:
-                from studio.backend.models import Skill
+                from backend.models import Skill
                 skill_names = role_obj.default_skills or []
                 if skill_names:
                     sk_q = await db.execute(
@@ -773,7 +773,7 @@ async def _execute_discussion(
 
             # 审查阶段额外上下文
             if status_val == "reviewing":
-                from studio.backend.services.workspace_service import get_effective_workspace
+                from backend.services.workspace_service import get_effective_workspace
                 review_ws = get_effective_workspace(project)
                 extra_parts.append(
                     f"\n## 审查环境\n"
@@ -788,7 +788,7 @@ async def _execute_discussion(
 
             raw_perms = getattr(project, 'tool_permissions', None)
             # 默认全开 (除 execute_command)，与 tool_registry.DEFAULT_PERMISSIONS 一致
-            from studio.backend.services.tool_registry import DEFAULT_PERMISSIONS
+            from backend.services.tool_registry import DEFAULT_PERMISSIONS
             tool_permissions = set(raw_perms) if raw_perms else set(DEFAULT_PERMISSIONS)
 
             system_prompt, system_sections = context_service.build_project_context(
@@ -824,7 +824,7 @@ async def _execute_discussion(
                 logger.warning(f"保存上下文总结失败: {se}")
 
         # ---- 工具定义 ----
-        from studio.backend.api.discussion import _check_model_supports_tools
+        from backend.api.discussion import _check_model_supports_tools
         model_supports_tools = await _check_model_supports_tools(model)
         if not model_supports_tools:
             tool_permissions = set()
@@ -840,7 +840,7 @@ async def _execute_discussion(
         )
 
         # 工具执行器
-        from studio.backend.services.workspace_service import get_effective_workspace
+        from backend.services.workspace_service import get_effective_workspace
         async with async_session_maker() as db2:
             result2 = await db2.execute(select(Project).where(Project.id == project_id))
             project2 = result2.scalar_one_or_none()
@@ -1137,18 +1137,18 @@ async def _execute_conversation(
     """
     后台执行独立对话 AI — 与 _execute_discussion 类似但不依赖 Project.
     """
-    from studio.backend.services import ai_service, context_service
-    from studio.backend.services.ai_service import new_request_id
-    from studio.backend.services.context_manager import (
+    from backend.services import ai_service, context_service
+    from backend.services.ai_service import new_request_id
+    from backend.services.context_manager import (
         prepare_context, build_usage_summary,
         summarize_context_if_needed, _generate_summary,
     )
-    from studio.backend.services.tool_registry import (
+    from backend.services.tool_registry import (
         get_tool_definitions, execute_tool, DEFAULT_PERMISSIONS,
     )
-    from studio.backend.core.model_capabilities import capability_cache
-    from studio.backend.core.config import settings
-    from studio.backend.models import Conversation, Skill
+    from backend.core.model_capabilities import capability_cache
+    from backend.core.config import settings
+    from backend.models import Conversation, Skill
 
     await _update_task_status(rt.task_id, "running")
     rt.status = "running"
@@ -1260,7 +1260,7 @@ async def _execute_conversation(
                 logger.warning(f"保存对话上下文总结失败: {se}")
 
         # ---- 工具定义 ----
-        from studio.backend.api.discussion import _check_model_supports_tools
+        from backend.api.discussion import _check_model_supports_tools
         model_supports_tools = await _check_model_supports_tools(model)
         if not model_supports_tools:
             tool_permissions = set()

@@ -245,8 +245,8 @@ async def load_tools_from_db():
     """从 DB 加载工具定义到内存缓存 (启动时调用)"""
     global _db_tool_cache, _db_perm_map_cache
     try:
-        from studio.backend.core.database import async_session_maker
-        from studio.backend.models import ToolDefinition
+        from backend.core.database import async_session_maker
+        from backend.models import ToolDefinition
         from sqlalchemy import select
 
         async with async_session_maker() as db:
@@ -296,7 +296,7 @@ def get_tool_definitions(permissions: Optional[Set[str]] = None) -> list:
 
     # 追加 MCP 工具
     try:
-        from studio.backend.services.mcp.execution_adapter import MCPExecutionAdapter
+        from backend.services.mcp.execution_adapter import MCPExecutionAdapter
         mcp_tools = MCPExecutionAdapter.get_mcp_tool_definitions(perms)
         tools.extend(mcp_tools)
     except Exception as e:

@@ -19,8 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r /tmp/requirements.txt
 
-# 复制应用代码 (保持 studio 包结构, 使 from studio.backend.xxx 正常工作)
-COPY . ./studio/
+COPY . .
 
 # 创建数据目录
 RUN mkdir -p /data/plans /data/db-backups /data/uploads
@@ -40,4 +39,4 @@ EXPOSE 8002
 #     --group-add $(stat -c '%g' /dev/video0) \
 #     -v ai-studio-data:/data \
 #     ai-studio
-CMD ["uvicorn", "studio.backend.main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8002"]

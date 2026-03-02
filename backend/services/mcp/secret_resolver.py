@@ -66,8 +66,8 @@ async def _collect_variables(
     variables: Dict[str, str] = {}
 
     try:
-        from studio.backend.core.database import async_session_maker
-        from studio.backend.models import WorkspaceDir, Project
+        from backend.core.database import async_session_maker
+        from backend.models import WorkspaceDir, Project
 
         async with async_session_maker() as db:
             ws = None
@@ -119,7 +119,7 @@ async def _collect_variables(
         logger.warning(f"SecretResolver: DB 查询失败: {e}")
 
     # 全局 settings fallback
-    from studio.backend.core.config import settings
+    from backend.core.config import settings
     variables.setdefault("github_token", settings.github_token or "")
     variables.setdefault("github_repo", settings.github_repo or "")
     variables.setdefault("workspace_path", settings.workspace_path or "")

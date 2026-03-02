@@ -90,9 +90,9 @@
       </n-layout-header>
 
       <n-layout-content
-        content-style="padding: 24px"
+        :content-style="route.name === 'ChatHome' || route.name === 'ChatView' ? 'padding: 0; height: 100%' : 'padding: 24px; min-height: 100%'"
         :native-scrollbar="false"
-        style="background: #1a1a1a"
+        style="background: #1a1a1a; display: flex; flex-direction: column;"
       >
         <router-view />
       </n-layout-content>

@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db
-from studio.backend.core.security import (
+from backend.core.database import get_db
+from backend.core.security import (
     hash_password,
     verify_password,
     create_studio_token,
@@ -26,7 +26,7 @@ from studio.backend.core.security import (
     STUDIO_PERMISSIONS,
     ROLE_DEFAULT_PERMISSIONS,
 )
-from studio.backend.models import StudioUser, UserStatus, UserRole
+from backend.models import StudioUser, UserStatus, UserRole
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/users", tags=["Users"])

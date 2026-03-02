@@ -19,10 +19,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func, delete, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings as studio_settings
-from studio.backend.core.database import get_db
-from studio.backend.core.security import get_studio_user  # noqa: keep for potential future use
-from studio.backend.models import CommandAuthRule, CommandAuditLog, Project
+from backend.core.config import settings as studio_settings
+from backend.core.database import get_db
+from backend.core.security import get_studio_user  # noqa: keep for potential future use
+from backend.models import CommandAuthRule, CommandAuditLog, Project
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +345,7 @@ async def match_command_rule(command: str, project_id: Optional[int] = None) -> 
 
     返回匹配的规则信息 {"rule_id": int, "action": "allow"|"deny"} 或 None
     """
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
 
     async with async_session_maker() as db:
         q = select(CommandAuthRule).where(CommandAuthRule.is_enabled == True)
@@ -410,7 +410,7 @@ async def log_command_audit(
     operator: str = "",
 ):
     """记录命令审计日志"""
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
 
     try:
         async with async_session_maker() as db:

@@ -13,11 +13,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db, async_session_maker
-from studio.backend.models import (
+from backend.core.database import get_db, async_session_maker
+from backend.models import (
     Project, ProjectStatus, Deployment, DeployStatus, DeployType, WorkspaceDir,
 )
-from studio.backend.services import deploy_service, github_service
+from backend.services import deploy_service, github_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/projects", tags=["Deployment"])

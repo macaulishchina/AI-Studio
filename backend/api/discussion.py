@@ -26,17 +26,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings
-from studio.backend.core.database import get_db
-from studio.backend.core.model_capabilities import capability_cache
-from studio.backend.core.project_types import get_role_for_status, get_ui_labels
-from studio.backend.core.security import get_studio_user, get_optional_studio_user
-from studio.backend.models import Project, Message, MessageRole, MessageType, ProjectStatus, Role
-from studio.backend.services import ai_service, context_service
-from studio.backend.services.ai_service import new_request_id
-from studio.backend.services.context_manager import prepare_context, build_usage_summary, summarize_context_if_needed, _generate_summary
-from studio.backend.services.tool_registry import get_tool_definitions, execute_tool, DEFAULT_PERMISSIONS
-from studio.backend.core.token_utils import estimate_tokens, truncate_text
+from backend.core.config import settings
+from backend.core.database import get_db
+from backend.core.model_capabilities import capability_cache
+from backend.core.project_types import get_role_for_status, get_ui_labels
+from backend.core.security import get_studio_user, get_optional_studio_user
+from backend.models import Project, Message, MessageRole, MessageType, ProjectStatus, Role
+from backend.services import ai_service, context_service
+from backend.services.ai_service import new_request_id
+from backend.services.context_manager import prepare_context, build_usage_summary, summarize_context_if_needed, _generate_summary
+from backend.services.tool_registry import get_tool_definitions, execute_tool, DEFAULT_PERMISSIONS
+from backend.core.token_utils import estimate_tokens, truncate_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/projects", tags=["Discussion"])
@@ -70,7 +70,7 @@ async def _resolve_active_role(project: Project, db: AsyncSession):
 async def _check_model_supports_tools(model: str) -> bool:
     """检查模型是否支持 tool calling (查询模型缓存)"""
     try:
-        from studio.backend.api.models_api import _model_cache
+        from backend.api.models_api import _model_cache
         models = await _model_cache.get_models()
         for m in models:
             if m.id == model:
@@ -146,7 +146,7 @@ async def get_ai_mute_status(
 @router.get("/{project_id}/streaming-status")
 async def get_streaming_status(project_id: int):
     """获取 AI 是否正在生成 (兼容旧前端 + 新 task 系统)"""
-    from studio.backend.services.task_runner import TaskManager
+    from backend.services.task_runner import TaskManager
     rt = TaskManager.get_project_active_task(project_id)
     return {"streaming": rt is not None and rt.status == "running"}
 
@@ -219,7 +219,7 @@ async def discuss(
       {"status": "queued", "active_task_id": N} — 已有任务在运行, 消息已保存
       {"status": "muted"}      — AI 已禁言, 消息已保存
     """
-    from studio.backend.services.task_runner import TaskManager, ProjectEventBus
+    from backend.services.task_runner import TaskManager, ProjectEventBus
 
     # 获取项目
     result = await db.execute(select(Project).where(Project.id == project_id))
@@ -272,7 +272,11 @@ async def discuss(
     if project.ai_muted and not data.regenerate:
         return {"status": "muted", "message": "AI 已禁言, 消息已保存", "user_message_id": user_message_id}
 
-    model = project.discussion_model or "gpt-4o"
+    # 模型解析优先级: 项目绑定模型 > 全局默认 > 硬编码 fallback
+    model = project.discussion_model
+    if not model:
+        from backend.services.config_service import get_chat_default_model
+        model = await get_chat_default_model() or "gpt-4o"
 
     # 启动后台 AI 任务
     task_id = await TaskManager.start_discussion_task(
@@ -326,7 +330,7 @@ async def delete_message(
     await db.commit()
 
     # 广播消息删除事件到项目总线
-    from studio.backend.services.task_runner import ProjectEventBus
+    from backend.services.task_runner import ProjectEventBus
     bus = ProjectEventBus.get(project_id)
     if bus:
         bus.publish({"type": "message_deleted", "message_id": message_id})
@@ -522,7 +526,7 @@ async def finalize_plan(
             plan_content = "".join(full_plan)
 
             # 保存 plan
-            from studio.backend.core.database import async_session_maker
+            from backend.core.database import async_session_maker
             async with async_session_maker() as save_db:
                 res = await save_db.execute(select(Project).where(Project.id == project_id))
                 proj = res.scalar_one()

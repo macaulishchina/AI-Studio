@@ -11,8 +11,8 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from typing import Optional
 
-from studio.backend.core.security import decode_studio_token
-from studio.backend.services.ws_hub import WsHub, WsClient
+from backend.core.security import decode_studio_token
+from backend.services.ws_hub import WsHub, WsClient
 
 logger = logging.getLogger(__name__)
 

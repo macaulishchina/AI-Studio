@@ -20,9 +20,9 @@
   4. 所有 MCP 调用经过统一审计 (MCPAuditLog)
 """
 
-from studio.backend.services.mcp.registry import MCPServerRegistry
-from studio.backend.services.mcp.client_manager import MCPClientManager
-from studio.backend.services.mcp.execution_adapter import MCPExecutionAdapter
+from backend.services.mcp.registry import MCPServerRegistry
+from backend.services.mcp.client_manager import MCPClientManager
+from backend.services.mcp.execution_adapter import MCPExecutionAdapter
 
 __all__ = [
     "MCPServerRegistry",

@@ -76,10 +76,15 @@
         <div class="chat-header">
           <h3>{{ activeConversation?.title || '新对话' }}</h3>
           <div class="chat-header-actions">
-            <ModelSelector
-              :model="activeConversation?.model || selectedModel"
-              @update:model="updateConversationModel($event)"
+            <n-select
+              v-model:value="selectedModel"
+              :options="modelOptions"
+              :render-label="renderModelLabel"
               size="small"
+              filterable
+              :consistent-menu-width="false"
+              style="min-width: 180px; max-width: 300px"
+              @update:value="updateConversationModel($event)"
             />
           </div>
         </div>
@@ -167,30 +172,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick, defineComponent, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, NButton, NInput, NIcon } from 'naive-ui'
+import { useMessage, NButton, NInput, NIcon, NSelect } from 'naive-ui'
 import { AddOutline, SendOutline, MenuOutline, CodeSlashOutline, ChatbubblesOutline, BookOutline, ConstructOutline } from '@vicons/ionicons5'
 import { conversationApi } from '@/api'
+import { useModelSelection } from '@/composables/useModelSelection'
 import { marked } from 'marked'
 
-// ========== Model Selector (inline mini component) ==========
-const ModelSelector = defineComponent({
-  name: 'ModelSelector',
-  props: {
-    model: { type: String, default: 'gpt-4o' },
-    size: { type: String, default: 'small' },
-  },
-  emits: ['update:model'],
-  setup(props, { emit }) {
-    // Simplified model display; full model selection can be added later
-    return () => h('span', {
-      class: 'model-badge',
-      title: props.model,
-      onClick: () => {
-        // TODO: open model picker popover
-      }
-    }, props.model.replace('copilot:', '').split('/').pop())
-  }
-})
+// ========== Model Selection (via composable) ==========
+const {
+  selectedModel: modelSelectionModel,
+  modelOptions,
+  renderModelLabel,
+  loadModels,
+} = useModelSelection('gpt-4o', { useGlobalDefault: true })
 
 // ========== State ==========
 const route = useRoute()
@@ -203,7 +197,7 @@ const sending = ref(false)
 const streaming = ref(false)
 const streamContent = ref('')
 const streamThinking = ref('')
-const selectedModel = ref('gpt-4o')
+const selectedModel = modelSelectionModel  // use shared ref
 const messagesRef = ref<HTMLElement>()
 
 // Conversations list
@@ -265,9 +259,17 @@ async function openConversation(id: number) {
   router.push(`/c/${id}`)
 }
 
-function updateConversationModel(model: string) {
+async function updateConversationModel(model: string) {
   selectedModel.value = model
-  // TODO: update server-side conversation model
+  // 如果有活跃对话, 更新服务端对话模型
+  const convId = activeConversationId.value
+  if (convId) {
+    try {
+      await conversationApi.update(convId, { model })
+    } catch (e: any) {
+      console.warn('更新对话模型失败:', e)
+    }
+  }
 }
 
 // ========== Chat Logic ==========
@@ -435,12 +437,18 @@ function formatTime(dateStr: string): string {
 // ========== Lifecycle ==========
 onMounted(() => {
   loadConversations()
+  loadModels()
 })
 
 // Watch route changes to load conversation messages
 watch(activeConversationId, async (id) => {
   if (id) {
     await loadMessages(id)
+    // 同步对话绑定的模型到选择器
+    const conv = activeConversation.value
+    if (conv?.model) {
+      selectedModel.value = conv.model
+    }
   } else {
     messages.value = []
   }
@@ -451,65 +459,77 @@ watch(activeConversationId, async (id) => {
 .chat-home {
   display: flex;
   height: 100%;
-  background: #1a1a1a;
+  background: #101014; /* 更深邃的背景 */
   color: #e0e0e0;
 }
 
 /* ── Sidebar ── */
 .sidebar {
-  width: 260px;
-  background: #171717;
-  border-right: 1px solid #2a2a2a;
+  width: 280px;
+  background: #18181c;
+  border-right: 1px solid #2d2d30;
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
 }
 .sidebar.collapsed {
   width: 0;
   overflow: hidden;
   border-right: none;
+  opacity: 0;
 }
 .sidebar-header {
-  padding: 12px;
+  padding: 16px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  border-bottom: 1px solid #2a2a2a;
+  gap: 8px;
+  /* border-bottom: 1px solid #2d2d30; */
 }
 .sidebar-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 0 8px 8px;
+}
+.sidebar-list::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-list::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
 }
 .conv-item {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.15s;
-  margin-bottom: 2px;
+  transition: all 0.2s;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
 }
 .conv-item:hover {
-  background: #252525;
+  background: #26262a;
 }
 .conv-item.active {
-  background: #2a2a2a;
+  background: #2b2b30;
+  border-color: #3a3a40;
 }
 .conv-title {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #eee;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .conv-time {
   font-size: 11px;
-  color: #666;
-  margin-top: 2px;
+  color: #777;
+  margin-top: 4px;
 }
 .empty-hint {
   text-align: center;
   color: #555;
-  padding: 40px 16px;
+  padding: 60px 16px;
   font-size: 13px;
 }
 
@@ -519,6 +539,8 @@ watch(activeConversationId, async (id) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
+  background-image: radial-gradient(circle at 50% 0%, #1e1e24 0%, #101014 60%);
 }
 
 /* ── Welcome ── */
@@ -529,63 +551,84 @@ watch(activeConversationId, async (id) => {
   align-items: center;
   justify-content: center;
   padding: 40px 20px;
-  gap: 8px;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
 }
 .welcome-logo {
-  font-size: 64px;
-  line-height: 1;
+  font-size: 72px;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 0 20px rgba(124, 108, 255, 0.2));
 }
 .welcome-title {
-  font-size: 28px;
-  font-weight: 600;
+  font-size: 32px;
+  font-weight: 700;
   color: #fff;
-  margin: 8px 0 0;
+  margin: 0;
+  background: linear-gradient(135deg, #fff 0%, #a5a5a5 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .welcome-subtitle {
   color: #888;
   font-size: 16px;
-  margin: 0 0 24px;
+  margin: 12px 0 40px;
 }
 .quick-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   justify-content: center;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 .quick-card {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  background: #212121;
+  gap: 10px;
+  padding: 12px 20px;
+  background: #1e1e22;
   border: 1px solid #333;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.15s;
-  font-size: 13px;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: #ccc;
 }
 .quick-card:hover {
   border-color: #7c6cff;
-  background: #252525;
+  background: #252529;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  color: #fff;
 }
 
 /* ── Input Area ── */
 .input-area {
-  padding: 12px 16px;
-  border-top: 1px solid #2a2a2a;
+  padding: 20px 0;
+  /* border-top: 1px solid #2a2a2a; */
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  position: relative;
 }
 .welcome-input {
-  width: 100%;
-  max-width: 640px;
-  border-top: none;
-  padding: 0;
+  /* Welcome 页特殊的样式 */
+  background: #1e1e22;
+  border: 1px solid #333;
+  border-radius: 16px;
+  padding: 12px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s;
+}
+.welcome-input:focus-within {
+  border-color: #7c6cff;
+  box-shadow: 0 8px 24px rgba(124, 108, 255, 0.15);
 }
 .input-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 /* ── Chat View ── */
@@ -594,19 +637,24 @@ watch(activeConversationId, async (id) => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
 }
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid #2a2a2a;
+  padding: 12px 24px;
+  /* border-bottom: 1px solid #2a2a2a; */
   flex-shrink: 0;
+  /* background: rgba(16, 16, 20, 0.8); */
+  /* backdrop-filter: blur(10px); */
+  z-index: 10;
 }
 .chat-header h3 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
+  color: #ddd;
 }
 .chat-header-actions {
   display: flex;
@@ -618,105 +666,153 @@ watch(activeConversationId, async (id) => {
 .messages-area {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 20px 24px;
+  scroll-behavior: smooth;
+}
+.messages-area::-webkit-scrollbar {
+  width: 6px;
+}
+.messages-area::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
 }
 .message {
   display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 32px;
   max-width: 800px;
   margin-left: auto;
   margin-right: auto;
 }
 .message-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   flex-shrink: 0;
-  background: #252525;
+  background: #1e1e22;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 .message.user .message-avatar {
-  background: #2a2a2a;
+  background: #2a2a30;
 }
 .message.assistant .message-avatar {
-  background: #2c2640;
+  background: linear-gradient(135deg, #2c2640 0%, #3d3459 100%);
 }
 .message-content {
   flex: 1;
   min-width: 0;
+  padding-top: 6px;
 }
 .message-sender {
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #999;
+  margin-bottom: 6px;
 }
 .message-text {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #eee;
   word-break: break-word;
 }
 .message-text :deep(pre) {
-  background: #141414;
-  border-radius: 6px;
-  padding: 12px;
+  background: #18181c;
+  border: 1px solid #2d2d30;
+  border-radius: 8px;
+  padding: 16px;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 12px 0;
 }
 .message-text :deep(code) {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 13px;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.message-text :deep(pre) :deep(code) {
+  background: transparent;
+  padding: 0;
 }
 .message-text :deep(p) {
-  margin: 4px 0;
+  margin: 8px 0;
+}
+.message-text :deep(ul), .message-text :deep(ol) {
+  padding-left: 20px;
+  margin: 8px 0;
 }
 .message-thinking {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #666;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #777;
+  background: #18181c;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-left: 3px solid #444;
 }
 .message-thinking.active {
   color: #7c6cff;
+  border-left-color: #7c6cff;
+  background: rgba(124, 108, 255, 0.05);
 }
 .message-tools {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #666;
+  margin-top: 12px;
 }
 .tool-call-item {
-  padding: 2px 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: #18181c;
+  border-radius: 4px;
+  border: 1px solid #333;
+  font-size: 12px;
+  color: #888;
+  margin-right: 6px;
+  margin-bottom: 4px;
 }
 .tool-result {
-  color: #4caf50;
-  margin-left: 4px;
+  color: #63e2b7;
+  margin-left: 6px;
+  font-weight: bold;
 }
 .message.streaming .message-text::after {
   content: '▊';
   animation: blink 0.7s infinite;
   color: #7c6cff;
-}
-@keyframes blink {
-  50% { opacity: 0; }
+  margin-left: 2px;
 }
 
-/* ── Model badge ── */
-.model-badge {
-  display: inline-flex;
-  padding: 2px 8px;
-  background: #252525;
-  border: 1px solid #333;
-  border-radius: 6px;
-  font-size: 11px;
-  color: #aaa;
-  cursor: pointer;
-  white-space: nowrap;
+/* ── Chat Input ── */
+.chat-view .input-area {
+  padding: 0 24px 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 20;
 }
-.model-badge:hover {
+.chat-view .input-area .n-input {
+  background: #1e1e22;
+  border: 1px solid #333;
+  border-radius: 16px;
+  padding: 12px 90px 12px 16px; /* 右侧预留给按钮 */
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+}
+.chat-view .input-area .n-input:focus-within {
   border-color: #7c6cff;
-  color: #ccc;
+  box-shadow: 0 -4px 24px rgba(124, 108, 255, 0.1);
+  background: #252529;
+}
+.chat-view .input-actions {
+  position: absolute;
+  bottom: 36px;
+  right: 36px;
+  margin: 0;
+  gap: 8px;
 }
 
 /* ── Responsive ── */
@@ -725,10 +821,18 @@ watch(activeConversationId, async (id) => {
     display: none;
   }
   .welcome-title {
-    font-size: 22px;
+    font-size: 24px;
   }
   .quick-actions {
     flex-direction: column;
+    width: 100%;
+    padding: 0 20px;
+  }
+  .message {
+    padding: 0 12px;
+  }
+  .chat-view .input-area {
+    padding: 0 12px 12px;
   }
 }
 </style>

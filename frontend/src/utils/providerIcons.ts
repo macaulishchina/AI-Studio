@@ -84,6 +84,12 @@ const PROVIDER_SVG_CONTENT: Record<string, string> = {
   siliconflow:
     '<rect rx="3" width="16" height="16" fill="#6366F1"/>' +
     '<text x="8" y="11.5" text-anchor="middle" fill="#fff" font-size="9" font-weight="700" font-family="system-ui,-apple-system,sans-serif">SF</text>',
+
+  // Anti-Gravity — Google gradient rocket badge
+  antigravity:
+    '<defs><linearGradient id="ag-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#EA4335"/><stop offset="100%" stop-color="#FBBC04"/></linearGradient></defs>' +
+    '<rect rx="3" width="16" height="16" fill="url(#ag-g)"/>' +
+    '<text x="8" y="11.5" text-anchor="middle" fill="#fff" font-size="9" font-weight="700" font-family="system-ui,-apple-system,sans-serif">AG</text>',
 }
 
 /**

@@ -285,7 +285,7 @@ class Tracer:
     async def _persist_spans(self, spans: List[TraceSpan]):
         """写入 SQLite"""
         try:
-            from studio.backend.core.database import async_session_maker
+            from backend.core.database import async_session_maker
             from sqlalchemy import text
 
             async with async_session_maker() as session:

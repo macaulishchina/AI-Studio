@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db, async_session_maker
-from studio.backend.models import Skill
+from backend.core.database import get_db, async_session_maker
+from backend.models import Skill
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/skills", tags=["Skills"])

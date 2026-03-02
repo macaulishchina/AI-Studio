@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.config import settings, PROJECT_ROOT
-from studio.backend.core.database import get_db
-from studio.backend.core.security import get_optional_studio_user
-from studio.backend.models import WorkspaceDir
+from backend.core.config import settings, PROJECT_ROOT
+from backend.core.database import get_db
+from backend.core.security import get_optional_studio_user
+from backend.models import WorkspaceDir
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/workspace-dirs", tags=["WorkspaceDirs"])
@@ -271,7 +271,7 @@ async def activate_workspace_dir(
     settings.svn_trunk_path = ws.svn_trunk_path or "trunk"
 
     # 清除工作区概览缓存 (切换后需要重新扫描)
-    from studio.backend.services.workspace_service import clear_overview_cache
+    from backend.services.workspace_service import clear_overview_cache
     clear_overview_cache()
 
     logger.info(f"🔄 切换活跃工作目录: {ws.path}")
@@ -354,7 +354,7 @@ async def validate_workspace_dir(
     if vcs_type == "git":
         provider = (ws.git_provider or "github").lower()
         if provider == "gitlab":
-            from studio.backend.services import gitlab_service
+            from backend.services import gitlab_service
             status = await gitlab_service.check_connection(
                 base_url=ws.gitlab_url or "https://gitlab.com",
                 repo=ws.gitlab_repo or "",
@@ -362,7 +362,7 @@ async def validate_workspace_dir(
             )
             return {"ok": bool(status.get("connected")), "vcs_type": "git", "provider": "gitlab", "status": status}
 
-        from studio.backend.services import github_service
+        from backend.services import github_service
         status = await github_service.check_connection(repo=ws.github_repo or "", token=ws.github_token or "")
         return {"ok": bool(status.get("connected")), "vcs_type": "git", "provider": "github", "status": status}
 

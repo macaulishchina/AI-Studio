@@ -14,9 +14,9 @@ import time
 from pathlib import Path
 from typing import Optional, Set
 
-from studio.backend.ai.rag.chunker import CodeChunker, TextChunker, Chunk
-from studio.backend.ai.rag.embeddings import EmbeddingService, get_embedding_service
-from studio.backend.ai.rag.index import VectorIndex, IndexEntry, get_vector_index
+from backend.ai.rag.chunker import CodeChunker, TextChunker, Chunk
+from backend.ai.rag.embeddings import EmbeddingService, get_embedding_service
+from backend.ai.rag.index import VectorIndex, IndexEntry, get_vector_index
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class BackgroundIndexer:
         embedding_service: Optional[EmbeddingService] = None,
         max_chunk_tokens: int = 512,
     ):
-        from studio.backend.core.config import settings
+        from backend.core.config import settings
         self.workspace_path = workspace_path or settings.WORKSPACE_PATH
         self._index = vector_index or get_vector_index()
         self._embedder = embedding_service or get_embedding_service()

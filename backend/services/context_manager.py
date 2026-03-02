@@ -19,8 +19,8 @@
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 
-from studio.backend.core.model_capabilities import capability_cache
-from studio.backend.core.token_utils import estimate_tokens, estimate_messages_tokens, truncate_text
+from backend.core.model_capabilities import capability_cache
+from backend.core.token_utils import estimate_tokens, estimate_messages_tokens, truncate_text
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,7 @@ async def _generate_summary(
 请直接输出总结（不需要标题或格式）:"""
 
     try:
-        from studio.backend.services.ai_service import chat_complete
+        from backend.services.ai_service import chat_complete
         summary = await chat_complete(
             messages=[{"role": "user", "content": summary_prompt}],
             model=model,

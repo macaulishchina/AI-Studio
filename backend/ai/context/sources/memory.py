@@ -34,7 +34,7 @@ class MemoryContextSource(BaseContextSource):
             return []
 
         try:
-            from studio.backend.ai.memory.store import get_memory_store
+            from backend.ai.memory.store import get_memory_store
             store = get_memory_store()
             if not store:
                 return []

@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from studio.backend.core.database import get_db
-from studio.backend.models import Snapshot, WorkspaceDir
-from studio.backend.services import snapshot_service
+from backend.core.database import get_db
+from backend.models import Snapshot, WorkspaceDir
+from backend.services import snapshot_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/snapshots", tags=["Snapshots"])
@@ -137,7 +137,7 @@ def _mask_token(t: str) -> str:
 @system_router.post("/github-token")
 async def set_github_token(body: _GHTokenBody, db: AsyncSession = Depends(get_db)):
     """设置 / 更新系统级 GitHub Token（持久化到 studio_config）"""
-    from studio.backend.services.config_service import set_github_token as _set
+    from backend.services.config_service import set_github_token as _set
     result = await _set(body.token.strip())
     return result
 
@@ -145,7 +145,7 @@ async def set_github_token(body: _GHTokenBody, db: AsyncSession = Depends(get_db
 @system_router.delete("/github-token")
 async def clear_github_token(db: AsyncSession = Depends(get_db)):
     """清除系统级 GitHub Token"""
-    from studio.backend.services.config_service import clear_github_token as _clear
+    from backend.services.config_service import clear_github_token as _clear
     result = await _clear()
     return result
 
@@ -153,14 +153,14 @@ async def clear_github_token(db: AsyncSession = Depends(get_db)):
 @system_router.get("/github-token")
 async def get_github_token_status():
     """获取系统级 GitHub Token 配置状态"""
-    from studio.backend.services.config_service import get_github_token_status as _get
+    from backend.services.config_service import get_github_token_status as _get
     return await _get()
 
 
 @system_router.post("/github-repo")
 async def set_github_repo(body: _GHRepoBody, db: AsyncSession = Depends(get_db)):
     """设置 GitHub 仓库（绑定到当前活跃工作目录）"""
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     repo = body.repo.strip()
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
@@ -175,7 +175,7 @@ async def set_github_repo(body: _GHRepoBody, db: AsyncSession = Depends(get_db))
 @system_router.delete("/github-repo")
 async def clear_github_repo(db: AsyncSession = Depends(get_db)):
     """清除 GitHub 仓库绑定（当前活跃工作目录）"""
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
         row.github_repo = ""
@@ -188,7 +188,7 @@ async def clear_github_repo(db: AsyncSession = Depends(get_db)):
 @system_router.post("/git-provider")
 async def set_git_provider(body: _GitProviderBody, db: AsyncSession = Depends(get_db)):
     """设置 Git 平台（github/gitlab），绑定当前活跃工作目录。"""
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     provider = (body.provider or "").strip().lower()
     if provider not in {"github", "gitlab"}:
         raise HTTPException(status_code=400, detail="provider 仅支持 github 或 gitlab")
@@ -212,7 +212,7 @@ async def set_git_provider(body: _GitProviderBody, db: AsyncSession = Depends(ge
 @system_router.post("/gitlab-token")
 async def set_gitlab_token(body: _GitLabTokenBody, db: AsyncSession = Depends(get_db)):
     """设置 / 更新 GitLab Token（绑定到当前活跃工作目录）"""
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     token = body.token.strip()
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
@@ -231,7 +231,7 @@ async def set_gitlab_token(body: _GitLabTokenBody, db: AsyncSession = Depends(ge
 
 @system_router.delete("/gitlab-token")
 async def clear_gitlab_token(db: AsyncSession = Depends(get_db)):
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
         row.gitlab_token = ""
@@ -244,7 +244,7 @@ async def clear_gitlab_token(db: AsyncSession = Depends(get_db)):
 @system_router.post("/gitlab-repo")
 async def set_gitlab_repo(body: _GitLabRepoBody, db: AsyncSession = Depends(get_db)):
     """设置 GitLab 仓库（namespace/project，绑定当前活跃工作目录）"""
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     repo = body.repo.strip()
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
@@ -258,7 +258,7 @@ async def set_gitlab_repo(body: _GitLabRepoBody, db: AsyncSession = Depends(get_
 
 @system_router.delete("/gitlab-repo")
 async def clear_gitlab_repo(db: AsyncSession = Depends(get_db)):
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
         row.gitlab_repo = ""
@@ -271,7 +271,7 @@ async def clear_gitlab_repo(db: AsyncSession = Depends(get_db)):
 @system_router.post("/gitlab-url")
 async def set_gitlab_url(body: _GitLabUrlBody, db: AsyncSession = Depends(get_db)):
     """设置 GitLab 实例地址（默认 https://gitlab.com）"""
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     url = body.url.strip().rstrip("/")
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
@@ -285,7 +285,7 @@ async def set_gitlab_url(body: _GitLabUrlBody, db: AsyncSession = Depends(get_db
 
 @system_router.delete("/gitlab-url")
 async def clear_gitlab_url(db: AsyncSession = Depends(get_db)):
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
     row = (await db.execute(select(WorkspaceDir).where(WorkspaceDir.is_active == True).limit(1))).scalar_one_or_none()
     if row:
         row.gitlab_url = "https://gitlab.com"
@@ -299,7 +299,7 @@ async def clear_gitlab_url(db: AsyncSession = Depends(get_db)):
 async def validate_svn_config():
     """验证 SVN 配置可用性（基于当前环境变量）。"""
     import subprocess
-    from studio.backend.core.config import settings as _s
+    from backend.core.config import settings as _s
 
     repo_url = (_s.svn_repo_url or "").strip()
     if not repo_url:
@@ -365,9 +365,9 @@ async def system_status():
         containers = ""
 
     # VCS 状态（自动检测 git/svn）
-    from studio.backend.core.config import settings as _settings
-    from studio.backend.core.database import async_session_maker
-    from studio.backend.services.workspace_service import get_workspace_vcs_info, _get_git_recent_commits, _get_svn_recent_commits, detect_vcs_type
+    from backend.core.config import settings as _settings
+    from backend.core.database import async_session_maker
+    from backend.services.workspace_service import get_workspace_vcs_info, _get_git_recent_commits, _get_svn_recent_commits, detect_vcs_type
     _active_ws = None
     try:
         async with async_session_maker() as db:
@@ -429,7 +429,7 @@ async def system_status():
             github_status["hint"] = "已配置 Token，但缺少 owner/repo 仓库绑定。"
             github_status["token_set"] = True
         else:
-            from studio.backend.services import github_service
+            from backend.services import github_service
             github_status = await github_service.check_connection(repo=_gh_repo, token=_gh_token)
 
         # GitLab
@@ -442,7 +442,7 @@ async def system_status():
             gitlab_status["hint"] = "已配置 Token，但缺少 namespace/project 仓库绑定。"
             gitlab_status["token_set"] = True
         else:
-            from studio.backend.services import gitlab_service
+            from backend.services import gitlab_service
             gitlab_status = await gitlab_service.check_connection(base_url=_gl_url, repo=_gl_repo, token=_gl_token)
 
     # Token 脱敏信息
@@ -497,5 +497,54 @@ async def workspace_overview(force_refresh: bool = False):
     获取工作区概览：VCS 信息 / 语言统计 / 关键文件 / 贡献者 / 近期提交。
     首次请求较慢（需扫描文件系统），之后 60 秒缓存。
     """
-    from studio.backend.services.workspace_service import get_workspace_overview
+    from backend.services.workspace_service import get_workspace_overview
     return await get_workspace_overview(force_refresh=force_refresh)
+
+
+# ── 模型设置 (chat / stt) ─────────────
+
+class _ModelSettingsBody(BaseModel):
+    chat_default_model: Optional[str] = None
+    chat_model_allowlist: Optional[List[str]] = None
+    stt_default_model: Optional[str] = None
+    stt_model_allowlist: Optional[List[str]] = None
+    stt_provider: Optional[str] = None
+    stt_api_base: Optional[str] = None
+    stt_api_key: Optional[str] = None
+
+
+@system_router.get("/model-settings")
+async def get_model_settings():
+    """获取全局模型配置 (聊天默认模型 / 白名单 / STT 配置)"""
+    from backend.services.config_service import get_model_settings as _get
+    result = await _get()
+    # mask stt_api_key
+    if result.get("stt_api_key"):
+        raw = result["stt_api_key"]
+        result["stt_api_key_masked"] = _mask_token(raw)
+        result["stt_api_key_configured"] = True
+        del result["stt_api_key"]  # 不返回明文
+    else:
+        result["stt_api_key_masked"] = ""
+        result["stt_api_key_configured"] = False
+        result.pop("stt_api_key", None)
+    return result
+
+
+@system_router.post("/model-settings")
+async def set_model_settings(body: _ModelSettingsBody):
+    """更新全局模型配置"""
+    from backend.services.config_service import set_model_settings as _set
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    result = await _set(updates)
+    # mask stt_api_key
+    if result.get("stt_api_key"):
+        raw = result["stt_api_key"]
+        result["stt_api_key_masked"] = _mask_token(raw)
+        result["stt_api_key_configured"] = True
+        del result["stt_api_key"]
+    else:
+        result["stt_api_key_masked"] = ""
+        result["stt_api_key_configured"] = False
+        result.pop("stt_api_key", None)
+    return result

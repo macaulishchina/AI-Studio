@@ -1,16 +1,13 @@
 """
-Copilot Provider — api.githubcopilot.com
+Anti-Gravity Provider — Google Antigravity OpenAI 兼容 API
 
-通过 OAuth Device Flow 授权，模拟 VS Code 请求头实现 Copilot 计费归集。
-同一 request_id 下的多次 API 调用 (工具调用轮次) 被 GitHub 后端归集为一次 premium request。
+通过 Google OAuth 授权，使用 Anti-Gravity 的 OpenAI 兼容端点访问
+Gemini, Claude 等模型。
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import platform
-import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -30,15 +27,9 @@ from .github_models import _parse_sse_chunk, _parse_completion_response, _parse_
 
 logger = logging.getLogger(__name__)
 
-# 应用实例级 session ID (启动时生成一次, 稳定用于计费关联)
-_STUDIO_SESSION_ID = str(uuid.uuid4()) + str(int(time.time() * 1000))
-_STUDIO_MACHINE_ID = hashlib.sha256(
-    f"{platform.node()}-studio-ai".encode()
-).hexdigest()
 
-
-class CopilotProvider(BaseProvider):
-    """GitHub Copilot API 提供商"""
+class AntigravityProvider(BaseProvider):
+    """Google Anti-Gravity API 提供商"""
 
     def __init__(self, info: ProviderInfo):
         super().__init__(info)
@@ -55,24 +46,18 @@ class CopilotProvider(BaseProvider):
         return self._client
 
     async def _get_headers(self, request_id: str = "") -> Dict[str, str]:
-        """获取 Copilot API 请求头 (含计费归集头)"""
-        from backend.services.copilot_auth import copilot_auth
+        """获取 Anti-Gravity API 请求头"""
+        from backend.services.antigravity_auth import antigravity_auth
 
-        if not copilot_auth.is_authenticated:
-            raise AuthenticationError("❌ 未授权 Copilot，请在设置页面完成 OAuth 授权")
+        if not antigravity_auth.is_authenticated:
+            raise AuthenticationError("❌ 未授权 Anti-Gravity，请在设置页面完成 Google 账号授权")
 
-        session_token = await copilot_auth.ensure_session()
+        access_token = await antigravity_auth.ensure_token()
         return {
-            "Authorization": f"Bearer {session_token}",
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
-            "editor-version": "vscode/1.96.0",
-            "editor-plugin-version": "copilot-chat/0.24.0",
-            "copilot-integration-id": "vscode-chat",
-            "openai-intent": "conversation-panel",
-            "user-agent": "Studio/1.0",
-            "x-request-id": request_id or str(uuid.uuid4()),
-            "vscode-sessionid": _STUDIO_SESSION_ID,
-            "vscode-machineid": _STUDIO_MACHINE_ID,
+            "User-Agent": "Studio/1.0",
+            "X-Request-Id": request_id or str(uuid.uuid4()),
         }
 
     def _build_url(self, path: str = "/chat/completions") -> str:
@@ -107,8 +92,7 @@ class CopilotProvider(BaseProvider):
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice
 
-        log_rid = f" (request_id: {request_id[:8]}...)" if request_id else ""
-        logger.info(f"Using Copilot API for model: {model}{log_rid}")
+        logger.info(f"Using Anti-Gravity API for model: {model}")
 
         client = self._get_client()
         async with client.stream(
@@ -120,11 +104,11 @@ class CopilotProvider(BaseProvider):
             if response.status_code != 200:
                 error_body = await response.aread()
                 error_text = error_body.decode()
-                logger.error(f"Copilot API error {response.status_code}: {error_text}")
+                logger.error(f"Anti-Gravity API error {response.status_code}: {error_text}")
                 yield ProviderEvent(
                     type=EventType.ERROR,
-                    error=f"❌ Copilot 服务错误 ({response.status_code}): {error_text}",
-                    error_meta=_parse_error_meta(response.status_code, error_text, model, "copilot"),
+                    error=f"❌ Anti-Gravity 服务错误 ({response.status_code}): {error_text}",
+                    error_meta=_parse_error_meta(response.status_code, error_text, model, "antigravity"),
                 )
                 return
 
@@ -177,12 +161,12 @@ class CopilotProvider(BaseProvider):
         )
         if response.status_code != 200:
             error_text = response.text
-            logger.error(f"Copilot API error {response.status_code}: {error_text}")
+            logger.error(f"Anti-Gravity API error {response.status_code}: {error_text}")
             from .base import ProviderError
             raise ProviderError(
-                f"Copilot 服务错误 ({response.status_code}): {error_text}",
+                f"Anti-Gravity 服务错误 ({response.status_code}): {error_text}",
                 status_code=response.status_code,
-                error_meta=_parse_error_meta(response.status_code, error_text, model, "copilot"),
+                error_meta=_parse_error_meta(response.status_code, error_text, model, "antigravity"),
             )
 
         return _parse_completion_response(response.json())

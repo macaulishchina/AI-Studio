@@ -14,7 +14,7 @@
 
 # === Re-exports from new modules ===
 
-from studio.backend.ai.tools.registry import (
+from backend.ai.tools.registry import (
     TOOL_PERMISSIONS,
     DEFAULT_PERMISSIONS,
     TOOL_PERMISSION_MAP as _TOOL_PERMISSION_MAP,
@@ -23,13 +23,13 @@ from studio.backend.ai.tools.registry import (
     get_tool_definitions,
 )
 
-from studio.backend.ai.tools.executor import (
+from backend.ai.tools.executor import (
     execute_tool,
     execute_parallel,
     CommandApprovalCallback,
 )
 
-from studio.backend.ai.tools.builtin.file_ops import (
+from backend.ai.tools.builtin.file_ops import (
     validate_path as _validate_path,
     is_sensitive_file as _is_sensitive_file,
     MAX_READ_LINES,
@@ -43,7 +43,7 @@ from studio.backend.ai.tools.builtin.file_ops import (
     CONFIG_ALLOWLIST as _CONFIG_ALLOWLIST,
 )
 
-from studio.backend.ai.tools.builtin.commands import (
+from backend.ai.tools.builtin.commands import (
     is_readonly_command as _is_readonly_command,
     COMMAND_TIMEOUT_SECONDS,
     READONLY_COMMANDS as _READONLY_COMMANDS,

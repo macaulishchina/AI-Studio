@@ -51,7 +51,7 @@ class WorkspaceContextSource(BaseContextSource):
     priority = 30  # 中等优先级
 
     async def gather(self, budget_tokens: int, **kwargs) -> List[ContextSection]:
-        from studio.backend.core.config import settings
+        from backend.core.config import settings
         workspace = kwargs.get("workspace") or getattr(settings, "WORKSPACE_PATH", "")
         if not workspace or not os.path.isdir(workspace):
             return []

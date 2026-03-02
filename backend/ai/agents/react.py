@@ -46,9 +46,9 @@ class ReActAgent(BaseAgent):
         self, input: AgentInput, plan: Optional[AgentPlan] = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         """主执行循环 — 委托给 LLMClient + tool loop"""
-        from studio.backend.ai.llm import get_llm_client, COPILOT_PREFIX, _is_reasoning_model
-        from studio.backend.core.model_capabilities import capability_cache
-        from studio.backend.core.token_utils import estimate_tokens, estimate_messages_tokens, truncate_text
+        from backend.ai.llm import get_llm_client, COPILOT_PREFIX, _is_reasoning_model
+        from backend.core.model_capabilities import capability_cache
+        from backend.core.token_utils import estimate_tokens, estimate_messages_tokens, truncate_text
 
         client = get_llm_client()
 
@@ -298,9 +298,9 @@ class ReActAgent(BaseAgent):
             else:
                 # 无 tool calls — 伪造检测
                 if response_has_content and tools and fabrication_retries < 2:
-                    from studio.backend.services.ai_service import _detect_fabrication
+                    from backend.services.ai_service import _detect_fabrication
                     try:
-                        from studio.backend.api.command_auth import is_fabrication_detection_enabled
+                        from backend.api.command_auth import is_fabrication_detection_enabled
                         fabrication_enabled = is_fabrication_detection_enabled()
                     except Exception:
                         fabrication_enabled = True

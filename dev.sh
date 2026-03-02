@@ -177,7 +177,7 @@ kill_port() {
 start_backend() {
     cd "$PROJECT_ROOT"
     kill_port 8002
-    python3 -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "$PROJECT_ROOT/backend"
+    python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "$PROJECT_ROOT/backend"
 }
 
 start_frontend() {
@@ -202,7 +202,7 @@ start_all_foreground() {
     trap cleanup SIGINT SIGTERM
 
     kill_port 8002
-    (cd "$PROJECT_ROOT" && python3 -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "$PROJECT_ROOT/backend") &
+    (cd "$PROJECT_ROOT" && python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "$PROJECT_ROOT/backend") &
     BACKEND_PID=$!
     sleep 2
     (cd "$PROJECT_ROOT/frontend" && npm run dev -- --host 0.0.0.0) &
@@ -235,7 +235,7 @@ start_with_tmux() {
 
     # 清理端口并构造后端启动命令
     kill_port 8002
-    local backend_cmd="cd '$PROJECT_ROOT' && export PYTHONPATH='$PYTHONPATH' STUDIO_DATA_PATH='$STUDIO_DATA_PATH' WORKSPACE_PATH='$WORKSPACE_PATH' STUDIO_ADMIN_USER='$STUDIO_ADMIN_USER' STUDIO_ADMIN_PASS='$STUDIO_ADMIN_PASS' STUDIO_SECRET_KEY='$STUDIO_SECRET_KEY' && python3 -m uvicorn studio.backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir '$PROJECT_ROOT/backend'"
+    local backend_cmd="cd '$PROJECT_ROOT' && export PYTHONPATH='$PYTHONPATH' STUDIO_DATA_PATH='$STUDIO_DATA_PATH' WORKSPACE_PATH='$WORKSPACE_PATH' STUDIO_ADMIN_USER='$STUDIO_ADMIN_USER' STUDIO_ADMIN_PASS='$STUDIO_ADMIN_PASS' STUDIO_SECRET_KEY='$STUDIO_SECRET_KEY' && python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir '$PROJECT_ROOT/backend'"
     local frontend_cmd="cd '$PROJECT_ROOT/frontend' && npm run dev -- --host 0.0.0.0"
 
     case "$TARGET" in

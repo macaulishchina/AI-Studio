@@ -6,13 +6,13 @@ Observability 子系统
   - budget: Token 预算管理 (会话/项目/全局)
   - metrics: 指标收集 (计数器/直方图/时间序列)
 """
-from studio.backend.ai.observability.tracer import (
+from backend.ai.observability.tracer import (
     Tracer, TraceSpan, TraceType, get_tracer, estimate_cost,
 )
-from studio.backend.ai.observability.budget import (
+from backend.ai.observability.budget import (
     BudgetManager, BudgetLimit, BudgetUsage, get_budget_manager,
 )
-from studio.backend.ai.observability.metrics import (
+from backend.ai.observability.metrics import (
     MetricsCollector, get_metrics,
 )
 

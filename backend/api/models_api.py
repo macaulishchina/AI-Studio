@@ -18,10 +18,10 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from studio.backend.core.config import settings
-from studio.backend.core.model_capabilities import capability_cache
-from studio.backend.models import ModelCapabilityOverride
-from studio.backend.services.copilot_auth import copilot_auth
+from backend.core.config import settings
+from backend.core.model_capabilities import capability_cache
+from backend.models import ModelCapabilityOverride
+from backend.services.copilot_auth import copilot_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/models", tags=["AI Models"])
@@ -221,7 +221,7 @@ async def load_pricing_overrides_from_db():
     """启动时从 DB 加载定价覆盖; 若有记录则完整替换运行时定价表"""
     global _COPILOT_PREMIUM_COST
     from sqlalchemy import select
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     try:
         async with async_session_maker() as db:
             result = await db.execute(
@@ -365,7 +365,7 @@ def _extract_limits_from_raw(raw: Dict[str, Any]) -> tuple[int, int]:
 
 async def _fetch_official_context_limits() -> Dict[str, tuple[int, int]]:
     """从 GitHub Models 官方 /models 接口提取 token 上限。"""
-    from studio.backend.api.provider_api import get_provider_by_slug
+    from backend.api.provider_api import get_provider_by_slug
 
     github_provider = await get_provider_by_slug("github")
     token = ((github_provider.api_key if github_provider else "") or settings.github_token or "").strip()
@@ -651,7 +651,7 @@ async def _fetch_github_models() -> List[ModelInfo]:
        b. 失败时回退到 DB 中的 backend="copilot" 模型
     4. 应用 DB 能力覆盖
     """
-    from studio.backend.api.provider_api import get_provider_by_slug
+    from backend.api.provider_api import get_provider_by_slug
 
     github_provider = await get_provider_by_slug("github")
     token = ((github_provider.api_key if github_provider else "") or settings.github_token or "").strip()
@@ -774,10 +774,10 @@ async def _fetch_github_models() -> List[ModelInfo]:
 
 async def _load_db_custom_models(api_backend: str) -> list:
     """从 DB 加载指定后端的自定义模型 (返回与 _parse_model 兼容的 dict 列表)"""
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     try:
         async with async_session_maker() as db:
-            from studio.backend.api.model_config import get_custom_models_from_db
+            from backend.api.model_config import get_custom_models_from_db
             return await get_custom_models_from_db(db, api_backend=api_backend)
     except Exception as e:
         logger.warning(f"从 DB 加载 {api_backend} 自定义模型失败: {e}")
@@ -786,10 +786,10 @@ async def _load_db_custom_models(api_backend: str) -> list:
 
 async def _apply_db_capability_overrides(models: List[ModelInfo]):
     """应用 DB 中的能力覆盖到模型列表 (boolean 能力: vision, tools, reasoning)"""
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     try:
         async with async_session_maker() as db:
-            from studio.backend.api.model_config import get_capability_overrides_map
+            from backend.api.model_config import get_capability_overrides_map
             overrides = await get_capability_overrides_map(db)
             if not overrides:
                 return
@@ -820,7 +820,7 @@ async def _apply_db_capability_overrides(models: List[ModelInfo]):
 async def _append_third_party_models(models: List[ModelInfo], seen_names: set):
     """从已启用的第三方 (openai_compatible) 提供商加载模型 — 优先 API 动态发现, 回退到预设"""
     try:
-        from studio.backend.api.provider_api import get_enabled_providers
+        from backend.api.provider_api import get_enabled_providers
         providers = await get_enabled_providers()
     except Exception as e:
         logger.warning(f"加载第三方提供商失败: {e}")
@@ -1260,7 +1260,7 @@ async def refresh_capabilities_online():
     matched: list[str] = []
 
     from sqlalchemy import select
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
 
     async with async_session_maker() as db:
         for m in models:
@@ -1403,7 +1403,7 @@ async def update_model_capability(model_id: str, data: CapabilityUpdate):
 
     # 也持久化到 DB
     try:
-        from studio.backend.core.database import async_session_maker
+        from backend.core.database import async_session_maker
         from sqlalchemy import select
         async with async_session_maker() as db:
             result = await db.execute(
@@ -1656,7 +1656,7 @@ async def apply_pricing(data: PricingApplyRequest):
 
     # 持久化到 DB: 保存所有条目 (重启后完整替换硬编码)
     from sqlalchemy import select
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
     db_saved = 0
     async with async_session_maker() as db:
         for model_name, entry in new_pricing.items():
@@ -1711,7 +1711,7 @@ async def get_current_pricing():
 async def reset_all_model_overrides():
     """一键恢复所有覆盖数据: 清空 DB 覆盖并恢复运行时默认定价/能力缓存。"""
     from sqlalchemy import delete as sa_delete
-    from studio.backend.core.database import async_session_maker
+    from backend.core.database import async_session_maker
 
     # 1) 清空 DB 覆盖 (能力 + 定价覆盖都在同一表)
     async with async_session_maker() as db:

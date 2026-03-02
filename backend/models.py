@@ -12,7 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from studio.backend.core.database import Base
+from backend.core.database import Base
 
 
 # ======================== Enums ========================

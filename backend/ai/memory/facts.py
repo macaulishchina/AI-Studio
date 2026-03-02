@@ -11,7 +11,7 @@ import re
 import uuid
 from typing import List, Optional
 
-from studio.backend.ai.memory.store import MemoryItem, MemoryType, get_memory_store
+from backend.ai.memory.store import MemoryItem, MemoryType, get_memory_store
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class FactExtractor:
         self, texts: List[str], project_id: Optional[str]
     ) -> List[MemoryItem]:
         """使用 LLM 提取结构化事实"""
-        from studio.backend.ai.llm import LLMClient
+        from backend.ai.llm import LLMClient
 
         client = LLMClient.get_instance()
         combined = "\n---\n".join(texts[-5:])  # 只取最近 5 条

@@ -11,7 +11,7 @@ from typing import Dict, Any
 import httpx
 from fastapi import APIRouter, HTTPException
 
-from studio.backend.services.copilot_auth import copilot_auth
+from backend.services.copilot_auth import copilot_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/copilot-auth", tags=["Copilot Auth"])
@@ -177,3 +177,41 @@ async def get_copilot_usage():
     except Exception as e:
         logger.exception("获取 Copilot 用量失败")
         raise HTTPException(status_code=500, detail=f"获取用量失败: {str(e)}")
+
+
+# ==================== 多账号管理 ====================
+
+@router.get("/accounts")
+async def list_accounts():
+    """列出所有 Copilot 账号 (OAuth token 脱敏)"""
+    return copilot_auth.list_accounts()
+
+
+@router.post("/accounts/switch")
+async def switch_account(body: dict):
+    """切换活跃 Copilot 账号"""
+    index = body.get("index", 0)
+    try:
+        result = copilot_auth.switch_account(index)
+        # 切换账号后清除用量缓存
+        global _usage_cache, _usage_cache_ts
+        _usage_cache = {}
+        _usage_cache_ts = 0
+        return {"success": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/accounts/{index}")
+async def remove_account(index: int):
+    """删除指定 Copilot 账号"""
+    try:
+        result = copilot_auth.remove_account(index)
+        # 清除用量缓存
+        global _usage_cache, _usage_cache_ts
+        _usage_cache = {}
+        _usage_cache_ts = 0
+        return {"success": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

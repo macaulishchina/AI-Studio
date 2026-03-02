@@ -18,7 +18,7 @@ import httpx
 from jose import jwt, JWTError
 from fastapi import Request, HTTPException, status
 
-from studio.backend.core.config import settings
+from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
 

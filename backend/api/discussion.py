@@ -279,6 +279,7 @@ async def discuss(
         model = await get_chat_default_model() or "gpt-4o"
 
     # 启动后台 AI 任务
+    _user_id = user.get("username", user.get("nickname", "user")) if user else "user"
     task_id = await TaskManager.start_discussion_task(
         project_id=project_id,
         model=model,
@@ -287,6 +288,7 @@ async def discuss(
         attachments=data.attachments,
         max_tool_rounds=data.max_tool_rounds,
         regenerate=data.regenerate,
+        user_id=_user_id,
     )
 
     return {"task_id": task_id, "user_message_id": user_message_id}

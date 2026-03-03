@@ -213,6 +213,12 @@ cp .env.example .env
 | `WORKSPACE_PATH` | 代码工作区路径 | `/workspace` |
 | `GITHUB_TOKEN` | GitHub Token (Models API + 仓库操作) | — |
 | `GITHUB_REPO` | GitHub 仓库 (owner/repo) | — |
+| `RAG_INDEX_INTERVAL_SECONDS` | RAG 后台索引间隔秒数 | `300` |
+| `RAG_EMBEDDING_PROVIDER` | RAG embedding 提供商 slug | `github` |
+| `RAG_EMBEDDING_MODEL` | RAG embedding 模型 | `text-embedding-3-small` |
+| `RAG_EMBEDDING_BATCH_SIZE` | 每次批量 embedding 数量 | `16` |
+| `RAG_EMBEDDING_RETRY_MAX` | embedding 429 最大重试次数 | `4` |
+| `RAG_EMBEDDING_RETRY_BASE_SECONDS` | embedding 429 退避基础秒数 | `0.8` |
 | `STUDIO_ADMIN_USER` | 管理员用户名 | `admin` |
 | `STUDIO_ADMIN_PASS` | 管理员密码 (空则自动生成并打印) | 自动生成 |
 | `STUDIO_SECRET_KEY` | JWT 签名密钥 (空则自动生成) | 自动生成 |

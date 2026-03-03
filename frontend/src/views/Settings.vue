@@ -37,6 +37,8 @@
           clearable
           size="small"
           placeholder="搜索设置项，如 项目 / AI / MCP / 用户"
+          autocomplete="off"
+          :input-props="{ autocomplete: 'off', name: 'settings-search-' + Date.now() }"
         />
         <n-menu
           style="margin-top: 10px"
@@ -67,6 +69,7 @@ import SkillSettings from './settings/SkillSettings.vue'
 import ToolSettings from './settings/ToolSettings.vue'
 import WorkflowSettings from './settings/WorkflowSettings.vue'
 import MCPSettings from './settings/MCPSettings.vue'
+import MemorySettings from './settings/MemorySettings.vue'
 import ProjectPermissions from './settings/ProjectPermissions.vue'
 import UserManagement from './settings/UserManagement.vue'
 
@@ -98,6 +101,7 @@ const allSections: SettingsSection[] = [
   { key: 'providers', label: '🔌 服务提供商', shortLabel: '提供商', group: 'ai', groupLabel: 'AI服务', aliases: ['ai'], component: AIServiceSettings },
   { key: 'preferences', label: '⚙️ 推理偏好', shortLabel: '推理偏好', group: 'ai', groupLabel: 'AI服务', component: AIPreferences },
   { key: 'models', label: '📊 模型配置', shortLabel: '模型配置', group: 'ai', groupLabel: 'AI服务', component: ModelSettings },
+  { key: 'memory', label: '🧠 模型记忆', shortLabel: '记忆', group: 'ai', groupLabel: 'AI服务', component: MemorySettings },
 
   { key: 'workflows', label: '📋 工作流编排', shortLabel: '工作流', group: 'workflow', groupLabel: '工作流', component: WorkflowSettings },
   { key: 'roles', label: '🎭 角色管理', shortLabel: '角色', group: 'workflow', groupLabel: '工作流', component: RoleSettings },

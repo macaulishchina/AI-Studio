@@ -206,3 +206,91 @@ async def get_stt_config() -> Dict[str, Any]:
         if key not in result:
             result[key] = [] if key.endswith("_allowlist") else ""
     return result
+
+
+# ── 记忆系统配置管理 ────────────────────────────────────────────────
+
+MEMORY_CONFIG_KEYS = {
+    "memory_enabled",               # bool (str "true"/"false")
+    "memory_extraction_model",      # str: 空 = 用聊天默认模型
+    "memory_consolidation_model",   # str: 空 = 同上
+    "memory_auto_extract",          # bool: 每次对话后自动提取
+    "memory_extract_assistant",     # bool: 是否从助手消息提取
+    "memory_max_per_user",          # int: 每用户记忆上限
+    "memory_decay_days",            # int: 未访问衰减天数
+    "memory_auto_consolidate_hours",  # int: 自动合并周期 (0=关闭)
+}
+
+_MEMORY_DEFAULTS = {
+    "memory_enabled": "true",
+    "memory_extraction_model": "",
+    "memory_consolidation_model": "",
+    "memory_auto_extract": "true",
+    "memory_extract_assistant": "true",
+    "memory_max_per_user": "500",
+    "memory_decay_days": "30",
+    "memory_auto_consolidate_hours": "24",
+}
+
+_MEMORY_BOOL_KEYS = {"memory_enabled", "memory_auto_extract", "memory_extract_assistant"}
+_MEMORY_INT_KEYS = {"memory_max_per_user", "memory_decay_days", "memory_auto_consolidate_hours"}
+
+
+async def get_memory_config() -> dict:
+    """获取记忆系统配置 (返回 Python 原生类型)"""
+    from backend.core.database import async_session_maker
+
+    raw: dict = {}
+    try:
+        async with async_session_maker() as db:
+            placeholders = ", ".join(f"'{k}'" for k in MEMORY_CONFIG_KEYS)
+            rows = (await db.execute(
+                text(f"SELECT key, value FROM studio_config WHERE key IN ({placeholders})")
+            )).all()
+            for key, value in rows:
+                raw[key] = value or ""
+    except Exception as e:
+        logger.debug(f"get_memory_config 跳过: {e}")
+
+    # 填充默认值 + 类型转换
+    result: dict = {}
+    for key in MEMORY_CONFIG_KEYS:
+        val = raw.get(key, _MEMORY_DEFAULTS.get(key, ""))
+        if key in _MEMORY_BOOL_KEYS:
+            result[key] = val.lower() in ("true", "1", "yes") if isinstance(val, str) else bool(val)
+        elif key in _MEMORY_INT_KEYS:
+            try:
+                result[key] = int(val) if val else int(_MEMORY_DEFAULTS[key])
+            except (ValueError, TypeError):
+                result[key] = int(_MEMORY_DEFAULTS[key])
+        else:
+            result[key] = val
+    return result
+
+
+async def set_memory_config(updates: dict) -> dict:
+    """批量更新记忆配置"""
+    from backend.core.database import async_session_maker
+
+    valid_updates = {k: v for k, v in updates.items() if k in MEMORY_CONFIG_KEYS}
+    if not valid_updates:
+        return await get_memory_config()
+
+    async with async_session_maker() as db:
+        for key, value in valid_updates.items():
+            if key in _MEMORY_BOOL_KEYS:
+                db_value = "true" if value in (True, "true", "1", "yes") else "false"
+            elif key in _MEMORY_INT_KEYS:
+                db_value = str(int(value)) if value else _MEMORY_DEFAULTS[key]
+            else:
+                db_value = str(value).strip() if value else ""
+
+            await db.execute(text(
+                "INSERT INTO studio_config (key, value, updated_at) VALUES (:k, :v, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = :v, updated_at = CURRENT_TIMESTAMP"
+            ), {"k": key, "v": db_value})
+
+        await db.commit()
+
+    logger.info(f"记忆配置已更新: {list(valid_updates.keys())}")
+    return await get_memory_config()

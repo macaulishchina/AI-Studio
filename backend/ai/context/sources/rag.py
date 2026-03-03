@@ -27,7 +27,7 @@ class RAGContextSource(BaseContextSource):
           - project_id: 项目 ID (筛选索引范围)
           - rag_enabled: 是否启用 RAG
         """
-        if not kwargs.get("rag_enabled", False):
+        if not kwargs.get("rag_enabled", True):
             return []
 
         query = kwargs.get("query", "")
@@ -40,11 +40,16 @@ class RAGContextSource(BaseContextSource):
             if not retriever:
                 return []
 
-            project_id = kwargs.get("project_id")
+            # 索引为空时跳过
+            if retriever._index.size == 0:
+                logger.debug("RAG 索引为空, 跳过检索")
+                return []
+
+            source_filter = kwargs.get("source_filter")
             chunks = await retriever.retrieve(
                 query=query,
                 top_k=5,
-                project_id=project_id,
+                source_filter=source_filter,
             )
 
             if not chunks:

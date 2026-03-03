@@ -227,12 +227,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useStudioConfigStore } from '@/stores/studioConfig'
 import { systemApi, modelApi, sttApi } from '@/api'
-import { getProviderIcon } from '@/utils/providerIcons'
-import { formatTokens } from '@/composables/useChatUtils'
+import { buildGroupedModelOptions, createModelLabelRenderer } from '@/utils/modelSelect'
 
 const studioConfig = useStudioConfigStore()
 const message = useMessage()
@@ -343,102 +342,17 @@ const sttDefaultOptions = computed(() => {
   return allSttModelOptions.value
 })
 
+const renderChatModelLabel = createModelLabelRenderer({
+  isPricingSyncedModel: (modelId: string) => studioConfig.isPricingSyncedModel(modelId),
+  isCapabilityCalibratedModel: (modelId: string) => studioConfig.isCapabilityCalibratedModel(modelId),
+})
+
 // ── 构建分组选项 ──
 function buildGroupedOptions(modelList: any[]) {
-  const mapOpt = (m: any) => ({
-    label: m.name, value: m.id,
-    supports_vision: m.supports_vision, supports_tools: m.supports_tools,
-    is_reasoning: m.is_reasoning, api_backend: m.api_backend,
-    provider_slug: m.provider_slug || (m.api_backend === 'copilot' ? 'copilot' : 'github'),
-    pricing_tier: m.pricing_tier, premium_multiplier: m.premium_multiplier,
-    is_deprecated: m.is_deprecated, pricing_note: m.pricing_note,
-    max_input_tokens: studioConfig.getEffectiveMaxInput(m.id, m.max_input_tokens || 0),
-    max_output_tokens: m.max_output_tokens || 0,
+  return buildGroupedModelOptions(modelList, {
+    getEffectiveMaxInput: (modelId: string, rawMaxInput: number) =>
+      studioConfig.getEffectiveMaxInput(modelId, rawMaxInput),
   })
-  const groups: Array<{ key: string; label: string; slug: string; items: any[] }> = []
-  const groupMap: Record<string, typeof groups[0]> = {}
-  for (const m of modelList) {
-    const family = m.model_family || m.publisher || m.provider_slug || 'Other'
-    const slug = m.provider_slug || (m.api_backend === 'copilot' ? 'copilot' : 'github')
-    const gKey = slug + ':' + family
-    if (!groupMap[gKey]) {
-      const g = { key: gKey, label: family, slug, items: [] as any[] }
-      groups.push(g)
-      groupMap[gKey] = g
-    }
-    groupMap[gKey].items.push(m)
-  }
-  return groups.map(g => ({
-    type: 'group' as const, label: g.label, key: g.key, provider_slug: g.slug,
-    children: g.items.map(mapOpt),
-  }))
-}
-
-// ── 自定义渲染 (聊天模型) ──
-function renderChatModelLabel(option: any, selected: boolean) {
-  if (option.type === 'group') {
-    const iconHtml = getProviderIcon(option.provider_slug || 'github', option.label, 14)
-    return h('span', { style: 'display:inline-flex;align-items:center;gap:4px' }, [
-      h('span', { innerHTML: iconHtml, style: 'display:inline-flex' }),
-      option.label,
-    ])
-  }
-  const iconHtml = getProviderIcon(option.provider_slug || 'github', '', 12)
-  const iconVNode = h('span', { innerHTML: iconHtml, style: 'display:inline-flex;vertical-align:middle;margin:0 2px' })
-  const priceText = option.pricing_note || 'x0'
-  const ctxText = option.max_input_tokens ? formatTokens(option.max_input_tokens) : ''
-  const cleanId = String(option.value || option.label || '').replace(/^copilot:/, '').toLowerCase()
-  const pricingConfirmed = studioConfig.isPricingSyncedModel(cleanId)
-  const capabilityConfirmed = studioConfig.isCapabilityCalibratedModel(cleanId)
-  const priceColor = pricingConfirmed
-    ? (String(priceText).startsWith('x0') ? '#36ad6a' : '#f0a020')
-    : '#8a93a6'
-  const priceBg = pricingConfirmed
-    ? (String(priceText).startsWith('x0') ? 'rgba(24,160,88,.14)' : 'rgba(240,160,32,.14)')
-    : 'rgba(138,147,166,.16)'
-  const chip = (text: string, style: string) => h('span', { style }, text)
-  const caps: string[] = []
-  if (option.is_reasoning) caps.push('推理')
-  if (option.supports_vision) caps.push('视觉')
-  if (option.supports_tools) caps.push('工具')
-  const capsShort = caps.length
-    ? caps.map(c => (c === '推理' ? '推' : c === '视觉' ? '视' : '工')).join('/')
-    : '未标'
-  const capsText = caps.length ? caps.join(' / ') : '未标注'
-  const subParts: string[] = []
-  if (ctxText) subParts.push(`${ctxText} 上下文`)
-  subParts.push(`能力：${capsText}`)
-  if (option.is_deprecated) subParts.push('即将弃用')
-  const subText = subParts.join(' · ')
-  const selectedMeta = `${ctxText ? `${ctxText} · ` : ''}能力:${capsShort} · ${priceText}`
-
-  const priceChip = chip(
-    priceText,
-    `font-size:10px;line-height:16px;padding:0 6px;border-radius:10px;background:${priceBg};color:${priceColor};font-weight:600;`
-  )
-
-  if (selected) {
-    return h('div', { style: 'display:flex;align-items:center;width:100%;min-width:0;overflow:hidden' }, [
-      iconVNode,
-      h('span', { style: 'margin-left:2px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, [
-        h('span', { style: 'font-weight:600' }, option.label as string),
-        h('span', {
-          style: `margin-left:6px;font-size:10px;color:${capabilityConfirmed ? '#2b7fd9' : '#8a93a6'}`
-        }, selectedMeta),
-      ]),
-    ])
-  }
-
-  return h('div', { style: 'display:flex;flex-direction:column;gap:2px;width:100%;padding:1px 0' }, [
-    h('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px' }, [
-      h('span', { style: `display:inline-flex;align-items:center;min-width:0;font-weight:${selected ? 600 : 500}` }, [
-        iconVNode,
-        h('span', { style: 'margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, option.label as string),
-      ]),
-      priceChip,
-    ]),
-    h('div', { style: `font-size:10px;color:${capabilityConfirmed ? '#2b7fd9' : '#8a93a6'};white-space:normal;line-height:1.35` }, subText),
-  ])
 }
 
 onMounted(async () => {

@@ -400,6 +400,23 @@ export const conversationApi = {
   summarizeContext: (convId: number) => api.post(`/conversations/${convId}/summarize-context`, null, { timeout: 60000 }),
 }
 
+// ==================== 记忆管理 (Memory) ====================
+export const memoryApi = {
+  list: (params?: { user_id?: string; conversation_id?: number; memory_type?: string; query?: string; limit?: number }) =>
+    api.get('/memory', { params }),
+  create: (data: { content: string; memory_type?: string; importance?: number; tags?: string[] }) =>
+    api.post('/memory', data),
+  update: (memoryId: string, data: { content?: string; importance?: number }) =>
+    api.patch(`/memory/${memoryId}`, data),
+  delete: (memoryId: string) => api.delete(`/memory/${memoryId}`),
+  getProfile: () => api.get('/memory/profile'),
+  consolidate: () => api.post('/memory/consolidate'),
+  getStats: () => api.get('/memory/stats'),
+  getConfig: () => api.get('/memory/config'),
+  updateConfig: (data: Record<string, any>) => api.put('/memory/config', data),
+  clear: () => api.post('/memory/clear'),
+}
+
 // ==================== 服务端语音 (Voice Hardware) ====================
 export const voiceApi = {
   /** 服务端音频输入设备列表 */

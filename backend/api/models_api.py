@@ -704,6 +704,7 @@ async def _fetch_github_models() -> List[ModelInfo]:
 
         # 先尝试从 Copilot API 动态获取模型列表
         dynamic_models = await _fetch_copilot_api_models()
+        dynamic_models = _select_canonical_copilot_models(dynamic_models)
         _SKIP_PATTERNS = {"embedding", "text-embedding", "oswe-"}
         if dynamic_models:
             for cp_raw in dynamic_models:
@@ -1074,6 +1075,147 @@ def _guess_tags_from_name(model_name: str) -> list:
     return tags
 
 
+def _normalize_copilot_canonical_id(model_id: str) -> str:
+    """将 Copilot 动态模型 ID 归一为 canonical key，用于版本变体归并。"""
+    mid = (model_id or "").strip().lower()
+    if not mid:
+        return mid
+
+    alias_map = {
+        "gpt-4-o-preview": "gpt-4o",
+        "gpt-4o-preview": "gpt-4o",
+    }
+    if mid in alias_map:
+        return alias_map[mid]
+
+    # 常见快照后缀: 2024-11-20 / 20250514 / 0613
+    mid = re.sub(r"-(20\d{2}-\d{2}-\d{2})$", "", mid)
+    mid = re.sub(r"-(20\d{6})$", "", mid)
+    mid = re.sub(r"-(\d{4})$", "", mid)
+
+    # Copilot 内部双活路由变体
+    if mid.startswith("oswe-vscode-"):
+        return "oswe-vscode"
+
+    return mid
+
+
+def _extract_variant_stamp(model_id: str) -> int:
+    """提取版本戳用于比较新旧（无版本戳返回 0）。"""
+    mid = (model_id or "").strip().lower()
+    m = re.search(r"-(20\d{2})-(\d{2})-(\d{2})$", mid)
+    if m:
+        return int(f"{m.group(1)}{m.group(2)}{m.group(3)}")
+    m = re.search(r"-(20\d{6})$", mid)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"-(\d{4})$", mid)
+    if m:
+        return int(m.group(1))
+    return 0
+
+
+def _select_canonical_copilot_models(raw_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Copilot 动态模型“认证归并”：
+    1) exact id 去重
+    2) canonical id 归并同家族快照/preview
+    3) 选择主版本：稳定 id > 非 preview > 上下文更大 > 新版本
+    """
+    exact_seen: set[str] = set()
+    exact_unique: List[Dict[str, Any]] = []
+    for row in raw_models or []:
+        mid = (row.get("id") or row.get("name") or "").strip().lower()
+        if not mid or mid in exact_seen:
+            continue
+        exact_seen.add(mid)
+        exact_unique.append(row)
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for row in exact_unique:
+        mid = (row.get("id") or row.get("name") or "").strip()
+        cid = _normalize_copilot_canonical_id(mid)
+        grouped.setdefault(cid, []).append(row)
+
+    selected: List[Dict[str, Any]] = []
+    for cid, variants in grouped.items():
+        if len(variants) == 1:
+            selected.append(variants[0])
+            continue
+
+        def rank(row: Dict[str, Any]) -> tuple:
+            mid = (row.get("id") or row.get("name") or "").strip().lower()
+            caps = row.get("capabilities", {}) or {}
+            limits = caps.get("limits", {}) or {}
+            max_prompt = int(limits.get("max_prompt_tokens") or limits.get("max_context_window_tokens") or 0)
+            max_output = int(limits.get("max_output_tokens") or 0)
+            is_preview = 1 if "preview" in mid else 0
+            is_exact_canonical = 1 if mid == cid else 0
+            is_primary = 1 if mid.endswith("-prime") else 0
+            return (
+                is_exact_canonical,
+                1 - is_preview,
+                is_primary,
+                max_prompt,
+                max_output,
+                _extract_variant_stamp(mid),
+            )
+
+        variants_sorted = sorted(variants, key=rank, reverse=True)
+        keep = variants_sorted[0]
+        dropped = variants_sorted[1:]
+        selected.append(keep)
+
+        logger.info(
+            "Copilot 变体归并: canonical=%s keep=%s dropped=%s",
+            cid,
+            keep.get("id") or keep.get("name"),
+            [d.get("id") or d.get("name") for d in dropped],
+        )
+
+    return selected
+
+
+def _model_quality_score(model: ModelInfo) -> tuple:
+    """用于同名模型去重时选择保留项：优先能力更强、上下文更大、免费且未弃用。"""
+    pricing_multiplier = model.premium_multiplier or 0.0
+    return (
+        1 if not model.is_deprecated else 0,
+        1 if model.supports_tools else 0,
+        1 if model.supports_vision else 0,
+        1 if model.is_reasoning else 0,
+        model.max_input_tokens or 0,
+        model.max_output_tokens or 0,
+        1 if model.pricing_tier == "free" else 0,
+        -int(pricing_multiplier * 1000),
+    )
+
+
+def _dedupe_models_by_source_and_name(models: List[ModelInfo]) -> List[ModelInfo]:
+    """
+    对同源+同显示名模型去重（常见于 Copilot 返回多个同名变体）。
+    保留质量分更高的一条，减少前端看到大量同名模型。
+    """
+    chosen: dict[tuple[str, str, str], ModelInfo] = {}
+    order: list[tuple[str, str, str]] = []
+
+    for model in models:
+        source = (model.provider_slug or model.api_backend or "").strip().lower()
+        name_key = (model.name or model.id or "").strip().lower()
+        key = (model.api_backend, source, name_key)
+
+        existing = chosen.get(key)
+        if existing is None:
+            chosen[key] = model
+            order.append(key)
+            continue
+
+        if _model_quality_score(model) > _model_quality_score(existing):
+            chosen[key] = model
+
+    return [chosen[key] for key in order]
+
+
 # ==================== 模型能力知识库 (内置校准数据) ====================
 # 格式: {model_name_prefix: {supports_vision, supports_tools, is_reasoning}}
 # 用于校准端点批量写入 DB, 前缀匹配 (gpt-4o 匹配 gpt-4o-2024-08-06)
@@ -1195,6 +1337,9 @@ async def list_models(
         result = [m for m in result if m.supports_vision]
     if api_backend:
         result = [m for m in result if m.api_backend == api_backend]
+
+    # 同源同名去重（尤其是 Copilot API 动态模型中常见同名变体）
+    result = _dedupe_models_by_source_and_name(result)
 
     return result
 

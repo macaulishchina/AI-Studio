@@ -80,6 +80,38 @@ def discover_key_dirs(workspace: str) -> List[str]:
                 break
     return found
 
+# ======================== Dogi 全局 AI 管家 Prompt ========================
+
+DOGI_SYSTEM_PROMPT = """你是 **多吉 (Dogi)** 🐕 — 一个全能 AI 管家。
+
+## 核心定位
+你是用户的私人 AI 助手，擅长编码开发、知识问答、文案撰写、数据分析、头脑风暴和日常对话。
+你不是产品经理、需求分析师或任何特定角色——你是一个全能的、友好的 AI 伙伴。
+
+## 性格与风格
+- **友好自然**: 轻松专业的语气，不过度正式也不过度随意
+- **高效直接**: 优先给出答案/方案，再补充解释，不做冗余铺垫
+- **主动思考**: 发现用户遗漏时主动补充，必要时追问关键细节
+- **谦逊诚实**: 遇到不确定的问题坦诚说明，不编造信息
+
+## 能力范围
+- 💻 **编码开发**: 读写代码、调试、架构设计、代码审查
+- 🔍 **知识检索**: 搜索工作区文件、理解项目结构、查阅文档
+- ✍️ **文案创作**: 技术文档、设计方案、README、日报周报
+- 📊 **数据分析**: 分析日志、统计数据、性能指标
+- 🧠 **头脑风暴**: 方案对比、技术选型、创意讨论
+- 🛠️ **工具使用**: 执行命令、文件操作、MCP 扩展工具
+- 💬 **日常对话**: 闲聊、答疑、学习辅导
+
+## 对话策略
+1. **先做再说** — 能直接完成的任务立即执行，不需要用户逐步授权
+2. **工具优先** — 涉及代码/文件/命令时，优先使用工具获取真实信息，不靠记忆猜测
+3. **简洁为主** — 用户问简单问题时给简洁答案；复杂问题才展开详细分析
+4. **记忆感知** — 记住用户在之前对话中透露的偏好和信息，提供个性化服务
+
+## 工作区
+你有工具可以浏览和操作当前工作区的文件。需要了解项目结构或代码时，请主动使用 `get_file_tree`、`read_file`、`search_text` 等工具按需获取，而不是依赖预加载的信息。"""
+
 # ======================== Legacy 硬编码 Prompts ========================
 # 兼容无 Role 配置的旧项目, 新项目应通过 Role 配置
 
@@ -502,3 +534,132 @@ def build_plan_generation_prompt(discussion_summary: str, role=None) -> str:
         return role.output_generation_prompt.replace("{discussion_summary}", discussion_summary)
     # legacy fallback
     return LEGACY_OUTPUT_GENERATION_PROMPT.replace("{discussion_summary}", discussion_summary)
+
+
+def build_dogi_context(
+    role=None,
+    extra_context: str = "",
+    budget_tokens: int = 0,
+    return_sections: bool = False,
+    tool_permissions: set = None,
+    skills: list = None,
+    memory_text: str = "",
+) -> Union[str, Tuple[str, List]]:
+    """
+    构建 Dogi 对话的 system prompt (独立于 build_project_context)
+
+    当 role 为 None 时使用 DOGI_SYSTEM_PROMPT (全能管家),
+    当 role 存在时仍尊重用户选择的角色定义.
+
+    Dogi 作为通用 AI 管家，不预加载项目结构/文件等信息。
+    需要时通过工具按需获取。
+
+    Args:
+        role: Role ORM 对象 (None = Dogi 默认管家人设)
+        extra_context: 额外上下文 (对话历史摘要等)
+        budget_tokens: system prompt token 预算 (0 = 不限制)
+        return_sections: 是否返回分段明细
+        tool_permissions: 工具权限集合
+        skills: Skill ORM 对象列表
+        memory_text: 已格式化的长期记忆文本段落
+
+    Returns:
+        str | (str, list)
+    """
+    # ---- Prompt 选择 ----
+    if role:
+        role_text = role.role_prompt or ""
+        strategy_text = role.strategy_prompt or ""
+        finalization_text = role.finalization_prompt or ""
+        tool_strategy_text = role.tool_strategy_prompt or ""
+    else:
+        role_text = DOGI_SYSTEM_PROMPT
+        strategy_text = ""
+        finalization_text = ""
+        tool_strategy_text = ""
+
+    if not tool_strategy_text.strip():
+        tool_strategy_text = DEFAULT_TOOL_STRATEGY
+
+    # 工具策略调整 (同 build_project_context)
+    _perms = tool_permissions or set()
+    if _perms and "ask_user" not in _perms:
+        tool_strategy_text = tool_strategy_text.replace(
+            "### ask_user — 关键问题补全工具（重要）",
+            "### 提问方式（ask_user 工具未开启）"
+        )
+        ask_disabled_notice = (
+            "⚠️ **ask_user 工具当前未开启**。\n"
+            "- 如需向用户提问，请直接用**普通文本**提出问题和选项。\n\n"
+        )
+        tool_strategy_text = ask_disabled_notice + tool_strategy_text
+
+    _code_tool_perms = _perms - {"ask_user"}
+    if _perms and "ask_user" in _perms and not _code_tool_perms:
+        ask_only_notice = (
+            "\n\n⚠️ **当前仅开启了 ask_user 工具，代码查看工具均未开启。**\n"
+            "- 不要尝试调用 read_file、search_text 等工具——它们不可用。\n"
+        )
+        tool_strategy_text = tool_strategy_text + ask_only_notice
+
+    # ---- 构建各段 ----
+    named_parts = []
+
+    if _perms and any(p in _perms for p in ("execute_readonly_command", "execute_command")):
+        named_parts.append(("核心规则", ANTI_FABRICATION_HEADER))
+
+    if role:
+        named_parts.append(("角色定义", role_text))
+        if strategy_text:
+            named_parts.append(("对话策略", strategy_text))
+    else:
+        named_parts.append(("Dogi 身份", role_text))
+
+    # 技能注入
+    if skills:
+        skill_sections = []
+        for sk in skills:
+            section = f"### {sk.icon} {sk.name}\n{sk.instruction_prompt}"
+            if sk.output_format:
+                section += f"\n\n**输出格式:**\n{sk.output_format}"
+            if sk.constraints:
+                constraints_text = "\n".join(f"- {c}" for c in sk.constraints)
+                section += f"\n\n**约束条件:**\n{constraints_text}"
+            skill_sections.append(section)
+        skill_block = "## 活跃技能\n\n以下技能定义了你在本次对话中应具备的专项能力。\n\n" + "\n\n---\n\n".join(skill_sections)
+        named_parts.append(("活跃技能", skill_block))
+
+    # 长期记忆注入
+    if memory_text:
+        named_parts.append(("长期记忆", memory_text))
+
+    if finalization_text:
+        named_parts.append(("敲定方案提示", finalization_text))
+
+    if extra_context:
+        named_parts.append(("对话上下文", extra_context))
+
+    named_parts.append(("工具使用策略", tool_strategy_text))
+
+    # 组装
+    parts_text = [text for (_, text) in named_parts]
+    context = "\n\n".join(parts_text)
+
+    if budget_tokens > 0:
+        current_tokens = estimate_tokens(context)
+        if current_tokens > budget_tokens:
+            logger.warning(
+                f"Dogi system prompt ({current_tokens} tokens) 超出预算 ({budget_tokens}), 截断"
+            )
+            from backend.core.token_utils import truncate_text
+            context = truncate_text(context, budget_tokens)
+
+    if not return_sections:
+        return context
+
+    sections = []
+    for name, text in named_parts:
+        section = {"name": name, "tokens": estimate_tokens(text), "content": text}
+        sections.append(section)
+
+    return context, sections

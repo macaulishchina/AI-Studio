@@ -57,14 +57,9 @@
                 <n-button v-if="!skill.is_builtin" size="tiny" quaternary @click="openEdit(skill)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
-                <n-tooltip v-else>
-                  <template #trigger>
-                    <n-button size="tiny" quaternary disabled>
-                      <template #icon><n-icon :component="CreateOutline" /></template>
-                    </n-button>
-                  </template>
-                  内置技能不可编辑
-                </n-tooltip>
+                <n-button v-else size="tiny" quaternary @click="openView(skill)">
+                  <template #icon><n-icon :component="EyeOutline" /></template>
+                </n-button>
                 <n-button size="tiny" quaternary @click="handleDuplicate(skill)">
                   <template #icon><n-icon :component="CopyOutline" /></template>
                 </n-button>
@@ -119,7 +114,7 @@
     <n-modal
       v-model:show="showEditor"
       preset="card"
-      :title="editingSkill ? `编辑技能 — ${editingSkill.name}` : '创建新技能'"
+      :title="viewOnly ? `查看技能 — ${editingSkill?.name}` : editingSkill ? `编辑技能 — ${editingSkill.name}` : '创建新技能'"
       style="width: 800px; max-width: 95vw"
       :mask-closable="false"
     >
@@ -128,10 +123,10 @@
         <n-tab-pane name="basic" tab="基本信息">
           <n-form :model="form" label-placement="left" label-width="100">
             <n-form-item label="技能名称">
-              <n-input v-model:value="form.name" placeholder="如：需求澄清、代码审查" />
+              <n-input v-model:value="form.name" placeholder="如：需求澄清、代码审查" :disabled="viewOnly" />
             </n-form-item>
             <n-form-item label="图标">
-              <n-input v-model:value="form.icon" placeholder="Emoji 图标" style="width: 80px" />
+              <n-input v-model:value="form.icon" placeholder="Emoji 图标" style="width: 80px" :disabled="viewOnly" />
             </n-form-item>
             <n-form-item label="分类">
               <n-select
@@ -139,10 +134,11 @@
                 :options="categoryOptions"
                 placeholder="选择分类"
                 style="width: 200px"
+                :disabled="viewOnly"
               />
             </n-form-item>
             <n-form-item label="描述">
-              <n-input v-model:value="form.description" placeholder="简短描述技能用途" />
+              <n-input v-model:value="form.description" placeholder="简短描述技能用途" :disabled="viewOnly" />
             </n-form-item>
           </n-form>
         </n-tab-pane>
@@ -156,6 +152,7 @@
                 type="textarea"
                 :rows="16"
                 placeholder="定义 AI 执行该技能时应遵循的步骤和方法论...&#10;&#10;支持 Markdown 格式"
+                :disabled="viewOnly"
               />
               <template #feedback>
                 <n-text depth="3" style="font-size: 12px">
@@ -175,6 +172,7 @@
                 type="textarea"
                 :rows="12"
                 placeholder="定义技能产出的标准格式模板...&#10;&#10;如 Markdown 表格、JSON 结构等"
+                :disabled="viewOnly"
               />
               <template #feedback>
                 <n-text depth="3" style="font-size: 12px">
@@ -193,6 +191,7 @@
                 v-model:value="form.constraints"
                 placeholder="输入一条约束 (如：不要推测原因)"
                 :min="0"
+                :disabled="viewOnly"
               />
               <template #feedback>
                 <n-text depth="3" style="font-size: 12px">
@@ -212,6 +211,7 @@
                 :options="toolOptions"
                 multiple
                 placeholder="选择该技能推荐使用的工具"
+                :disabled="viewOnly"
               />
               <template #feedback>
                 <n-text depth="3" style="font-size: 12px">
@@ -220,7 +220,7 @@
               </template>
             </n-form-item>
             <n-form-item label="标签">
-              <n-dynamic-tags v-model:value="form.tags" />
+              <n-dynamic-tags v-model:value="form.tags" :disabled="viewOnly" />
               <template #feedback>
                 <n-text depth="3" style="font-size: 12px">
                   用于搜索和分组的标签
@@ -261,8 +261,8 @@
 
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEditor = false">取消</n-button>
-          <n-button type="primary" @click="handleSave" :loading="saving">
+          <n-button @click="showEditor = false">{{ viewOnly ? '关闭' : '取消' }}</n-button>
+          <n-button v-if="!viewOnly" type="primary" @click="handleSave" :loading="saving">
             {{ editingSkill ? '保存' : '创建' }}
           </n-button>
         </n-space>
@@ -274,7 +274,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { AddOutline, CreateOutline, CopyOutline, TrashOutline } from '@vicons/ionicons5'
+import { AddOutline, CreateOutline, CopyOutline, TrashOutline, EyeOutline } from '@vicons/ionicons5'
 import { useSkillStore, type Skill } from '@/stores/skill'
 
 const message = useMessage()
@@ -283,6 +283,7 @@ const store = useSkillStore()
 const showEditor = ref(false)
 const editorTab = ref('basic')
 const editingSkill = ref<Skill | null>(null)
+const viewOnly = ref(false)
 const saving = ref(false)
 const activeCategory = ref('')
 

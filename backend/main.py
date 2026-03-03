@@ -2,6 +2,7 @@
 Dogi (多吉) - FastAPI 主入口
 AI 驱动的通用对话与项目协作平台
 """
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -33,6 +34,7 @@ from backend.api.workspace_dirs import router as workspace_dirs_router
 from backend.api.mcp import router as mcp_router, seed_mcp_servers
 from backend.api.conversations import router as conversations_router
 from backend.api.observability import router as observability_router
+from backend.api.memory import router as memory_router
 from backend.api.voice import router as voice_router
 from backend.api.camera import router as camera_router
 from backend.api.stt import router as stt_router
@@ -107,7 +109,43 @@ async def lifespan(app: FastAPI):
     # 加载 DB 持久化的系统配置到 settings
     await _load_studio_config()
 
+    # RAG 后台索引器: 启动后台扫描 → 分块 → 向量化
+    rag_indexer = None
+    try:
+        from backend.ai.rag.indexer import get_indexer
+        from backend.core.config import settings
+        rag_indexer = get_indexer()
+        await rag_indexer.start(interval_seconds=settings.rag_index_interval_seconds)
+        logger.info("✅ RAG 后台索引器已启动 (interval=%ss)", settings.rag_index_interval_seconds)
+    except Exception as e:
+        logger.warning(f"RAG 索引器启动失败 (非致命): {e}")
+
+    # 记忆系统后台整理任务 (周期性衰减 + 合并 + 修剪)
+    memory_consolidation_task: asyncio.Task | None = None
+    try:
+        memory_consolidation_task = asyncio.create_task(
+            _memory_consolidation_loop(), name="memory-consolidation"
+        )
+        logger.info("✅ 记忆后台整理任务已启动")
+    except Exception as e:
+        logger.warning(f"记忆后台整理任务启动失败 (非致命): {e}")
+
     yield
+
+    # ── 关闭记忆整理后台任务 ──
+    if memory_consolidation_task and not memory_consolidation_task.done():
+        memory_consolidation_task.cancel()
+        try:
+            await memory_consolidation_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    # ── 关闭 RAG 索引器 ──
+    if rag_indexer:
+        try:
+            await rag_indexer.stop()
+        except Exception:
+            pass
 
     # ── 关闭所有活跃的硬件 SSE 流 (防止 shutdown 阻塞热更新) ──
     try:
@@ -439,9 +477,85 @@ async def _auto_migrate():
             except Exception:
                 pass
 
+            # ── memory_items 表 (长期记忆 v2, ORM 模型) ──
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS memory_items (
+                    id VARCHAR(32) PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    memory_type VARCHAR(20) NOT NULL DEFAULT 'fact',
+                    user_id VARCHAR(100) NOT NULL,
+                    project_id VARCHAR(50),
+                    conversation_id INTEGER,
+                    importance REAL DEFAULT 0.5,
+                    embedding JSON,
+                    tags JSON DEFAULT '[]',
+                    source VARCHAR(50) DEFAULT '',
+                    access_count INTEGER DEFAULT 0,
+                    last_accessed REAL DEFAULT 0,
+                    created_at REAL DEFAULT 0,
+                    updated_at REAL DEFAULT 0,
+                    metadata JSON DEFAULT '{}'
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS ix_memory_user ON memory_items(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS ix_memory_conv ON memory_items(conversation_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS ix_memory_user_type ON memory_items(user_id, memory_type)")
+            # 列迁移: 旧表可能缺 embedding / metadata 列
+            try:
+                cursor_mem = await db.execute("PRAGMA table_info(memory_items)")
+                mem_cols = {row[1] for row in await cursor_mem.fetchall()}
+                if "embedding" not in mem_cols:
+                    await db.execute("ALTER TABLE memory_items ADD COLUMN embedding JSON")
+                    logger.info("✅ 自动迁移: 添加 memory_items.embedding")
+            except Exception:
+                pass
+            logger.info("✅ memory_items 表就绪")
+
             await db.commit()
     except Exception as e:
         logger.warning(f"⚠️ 自动迁移跳过: {e}")
+
+
+async def _memory_consolidation_loop():
+    """后台循环: 定期对所有用户执行记忆衰减 + 修剪 + 合并."""
+    import asyncio
+    from backend.services.config_service import get_memory_config
+    from backend.ai.memory import get_memory_store, get_memory_service
+
+    # 启动后先等 60s, 让其它服务先就绪
+    await asyncio.sleep(60)
+
+    while True:
+        try:
+            cfg = await get_memory_config()
+            if not cfg.get("memory_enabled", True):
+                await asyncio.sleep(3600)
+                continue
+
+            interval_hours = cfg.get("memory_auto_consolidate_hours", 24)
+            if interval_hours <= 0:
+                await asyncio.sleep(3600)
+                continue
+
+            store = get_memory_store()
+            svc = get_memory_service()
+
+            user_ids = await store.get_all_user_ids()
+            if user_ids:
+                logger.info(f"🧠 记忆后台整理: 处理 {len(user_ids)} 个用户")
+                for uid in user_ids:
+                    try:
+                        await svc.consolidate(uid)
+                    except Exception as ue:
+                        logger.warning(f"记忆整理失败 [{uid}]: {ue}")
+                logger.info("🧠 记忆后台整理完成")
+
+            await asyncio.sleep(interval_hours * 3600)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"记忆后台整理异常: {e}")
+            await asyncio.sleep(3600)
 
 
 async def _migrate_null_role_projects():
@@ -667,6 +781,7 @@ app.include_router(workspace_dirs_router)
 app.include_router(mcp_router)
 app.include_router(observability_router)
 app.include_router(conversations_router)
+app.include_router(memory_router)
 app.include_router(voice_router)
 app.include_router(camera_router)
 app.include_router(stt_router)

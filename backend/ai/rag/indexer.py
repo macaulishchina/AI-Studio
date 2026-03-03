@@ -61,7 +61,8 @@ class BackgroundIndexer:
         max_chunk_tokens: int = 512,
     ):
         from backend.core.config import settings
-        self.workspace_path = workspace_path or settings.WORKSPACE_PATH
+        self.workspace_path = workspace_path or settings.workspace_path
+        self._embed_batch_size = max(1, int(getattr(settings, "rag_embedding_batch_size", 16)))
         self._index = vector_index or get_vector_index()
         self._embedder = embedding_service or get_embedding_service()
         self._code_chunker = CodeChunker(max_chunk_tokens=max_chunk_tokens)
@@ -205,29 +206,32 @@ class BackgroundIndexer:
             rel = os.path.relpath(fpath, self.workspace_path)
             chunks = self._text_chunker.chunk_text(content, rel)
 
-        # 向量化 + 入库
-        for chunk in chunks:
-            if not chunk.content.strip():
-                continue
+        # 向量化 + 入库 (批量 embedding，减少请求频率)
+        valid_chunks = [chunk for chunk in chunks if chunk.content.strip()]
+        for i in range(0, len(valid_chunks), self._embed_batch_size):
+            batch_chunks = valid_chunks[i:i + self._embed_batch_size]
+            texts = [chunk.content for chunk in batch_chunks]
+
             try:
-                embedding = await self._embedder.embed_text(chunk.content)
+                embeddings = await self._embedder.embed(texts)
             except Exception:
                 continue
 
-            entry_id = hashlib.md5(
-                f"{chunk.source}:{chunk.start_line}:{chunk.end_line}:{chunk.content[:50]}".encode()
-            ).hexdigest()
+            for chunk, embedding in zip(batch_chunks, embeddings):
+                entry_id = hashlib.md5(
+                    f"{chunk.source}:{chunk.start_line}:{chunk.end_line}:{chunk.content[:50]}".encode()
+                ).hexdigest()
 
-            self._index.upsert(IndexEntry(
-                id=entry_id,
-                content=chunk.content,
-                embedding=embedding,
-                source=chunk.source,
-                chunk_type=chunk.chunk_type,
-                start_line=chunk.start_line,
-                end_line=chunk.end_line,
-                metadata=chunk.metadata or {},
-            ))
+                self._index.upsert(IndexEntry(
+                    id=entry_id,
+                    content=chunk.content,
+                    embedding=embedding,
+                    source=chunk.source,
+                    chunk_type=chunk.chunk_type,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                    metadata=chunk.metadata or {},
+                ))
 
 
 # ── 全局单例 ──

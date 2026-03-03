@@ -43,14 +43,9 @@
                 <n-button v-if="!tool.is_builtin" size="tiny" quaternary @click="openEdit(tool)">
                   <template #icon><n-icon :component="CreateOutline" /></template>
                 </n-button>
-                <n-tooltip v-else>
-                  <template #trigger>
-                    <n-button size="tiny" quaternary disabled>
-                      <template #icon><n-icon :component="CreateOutline" /></template>
-                    </n-button>
-                  </template>
-                  内置工具不可编辑
-                </n-tooltip>
+                <n-button v-else size="tiny" quaternary @click="openView(tool)">
+                  <template #icon><n-icon :component="EyeOutline" /></template>
+                </n-button>
                 <n-button size="tiny" quaternary @click="handleDuplicate(tool)">
                   <template #icon><n-icon :component="CopyOutline" /></template>
                 </n-button>
@@ -111,7 +106,7 @@
     <n-modal
       v-model:show="showEditor"
       preset="card"
-      :title="editingTool ? `编辑工具 — ${editingTool.display_name}` : '添加自定义工具'"
+      :title="viewOnly ? `查看工具 — ${editingTool?.display_name}` : editingTool ? `编辑工具 — ${editingTool.display_name}` : '添加自定义工具'"
       style="width: 800px; max-width: 95vw"
       :mask-closable="false"
     >
@@ -123,20 +118,20 @@
               <n-input
                 v-model:value="form.name"
                 placeholder="函数名 (如 my_tool)"
-                :disabled="editingTool?.is_builtin"
+                :disabled="viewOnly || editingTool?.is_builtin"
               />
               <template #feedback>
                 <n-text depth="3" style="font-size: 11px">OpenAI function calling 中的函数名，只允许字母、数字、下划线</n-text>
               </template>
             </n-form-item>
             <n-form-item label="显示名称">
-              <n-input v-model:value="form.display_name" placeholder="中文显示名 (如 读取文件)" />
+              <n-input v-model:value="form.display_name" placeholder="中文显示名 (如 读取文件)" :disabled="viewOnly" />
             </n-form-item>
             <n-form-item label="图标">
-              <n-input v-model:value="form.icon" placeholder="Emoji" style="width: 80px" />
+              <n-input v-model:value="form.icon" placeholder="Emoji" style="width: 80px" :disabled="viewOnly" />
             </n-form-item>
             <n-form-item label="描述">
-              <n-input v-model:value="form.description" placeholder="管理员可见的描述" />
+              <n-input v-model:value="form.description" placeholder="管理员可见的描述" :disabled="viewOnly" />
             </n-form-item>
             <n-form-item label="权限标识">
               <n-select
@@ -145,6 +140,7 @@
                 filterable
                 tag
                 placeholder="选择或输入新权限标识 (如 read_source)"
+                :disabled="viewOnly"
               />
               <template #feedback>
                 <n-text depth="3" style="font-size: 11px">关联到项目工具权限开关，同一 permission_key 的工具受同一开关控制</n-text>
@@ -155,6 +151,7 @@
                 v-model:value="form.executor_type"
                 :options="executorOptions"
                 style="width: 200px"
+                :disabled="viewOnly"
               />
             </n-form-item>
           </n-form>
@@ -171,6 +168,7 @@
             :rows="20"
             placeholder='{"name": "my_tool", "description": "...", "parameters": {...}}'
             style="font-family: monospace; font-size: 12px"
+            :disabled="viewOnly"
           />
           <n-text v-if="jsonError" type="error" style="font-size: 12px; margin-top: 4px; display: block">
             ⚠️ {{ jsonError }}
@@ -190,8 +188,8 @@
 
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEditor = false">取消</n-button>
-          <n-button type="primary" @click="handleSave" :loading="saving">
+          <n-button @click="showEditor = false">{{ viewOnly ? '关闭' : '取消' }}</n-button>
+          <n-button v-if="!viewOnly" type="primary" @click="handleSave" :loading="saving">
             {{ editingTool ? '保存' : '创建' }}
           </n-button>
         </n-space>
@@ -203,7 +201,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { AddOutline, CreateOutline, CopyOutline, TrashOutline, ChevronDownOutline, ChevronUpOutline } from '@vicons/ionicons5'
+import { AddOutline, CreateOutline, CopyOutline, TrashOutline, ChevronDownOutline, ChevronUpOutline, EyeOutline } from '@vicons/ionicons5'
 import { useToolStore, type ToolDef } from '@/stores/tool'
 import CommandAuthSettings from './CommandAuthSettings.vue'
 
@@ -214,6 +212,7 @@ const showCommandAuth = ref(false)
 const showEditor = ref(false)
 const editorTab = ref('basic')
 const editingTool = ref<ToolDef | null>(null)
+const viewOnly = ref(false)
 const saving = ref(false)
 const functionDefJson = ref('')
 const jsonError = ref('')
@@ -280,6 +279,25 @@ function openCreate() {
 
 function openEdit(tool: ToolDef) {
   editingTool.value = tool
+  viewOnly.value = false
+  Object.assign(form, {
+    name: tool.name,
+    display_name: tool.display_name,
+    icon: tool.icon,
+    description: tool.description,
+    permission_key: tool.permission_key,
+    executor_type: tool.executor_type,
+    executor_config: { ...(tool.executor_config || {}) },
+  })
+  functionDefJson.value = JSON.stringify(tool.function_def || {}, null, 2)
+  jsonError.value = ''
+  editorTab.value = 'basic'
+  showEditor.value = true
+}
+
+function openView(tool: ToolDef) {
+  editingTool.value = tool
+  viewOnly.value = true
   Object.assign(form, {
     name: tool.name,
     display_name: tool.display_name,

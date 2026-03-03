@@ -253,10 +253,13 @@ start_with_tmux() {
             ;;
     esac
 
-    echo -e "${GREEN}✅ tmux 后台会话已创建: $session${NC}"
-    echo "  进入会话: tmux attach -t $session"
-    echo "  查看窗口: tmux list-windows -t $session"
+    echo -e "${GREEN}✅ tmux 会话已创建: $session, 正在进入...${NC}"
+    echo "  退出会话: Ctrl+B, D (detach)"
+    echo "  重新进入: tmux attach -t $session"
     echo "  结束会话: tmux kill-session -t $session"
+    echo ""
+
+    tmux attach-session -t "$session"
 }
 
 main() {

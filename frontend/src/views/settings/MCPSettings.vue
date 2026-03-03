@@ -73,6 +73,8 @@
             show-password-on="click"
             clearable
             placeholder="输入新的 GitHub Token（留空则不改）"
+            autocomplete="new-password"
+            :input-props="{ autocomplete: 'new-password', name: 'mcp-token-' + Date.now() }"
             @keyup.enter="saveGithubOverride"
           />
           <n-space class="cred-actions" :size="8" align="center">

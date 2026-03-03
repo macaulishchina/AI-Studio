@@ -179,11 +179,12 @@ def _extract_command_pattern(command: str) -> str:
 class RunningTask:
     """一次 AI 后台执行的运行时状态"""
 
-    def __init__(self, task_id: int, project_id: int, sender_name: str = "", model: str = ""):
+    def __init__(self, task_id: int, project_id: int, sender_name: str = "", model: str = "", user_id: str = ""):
         self.task_id = task_id
         self.project_id = project_id
         self.sender_name = sender_name
         self.model = model
+        self.user_id = user_id
         self.events: List[dict] = []           # 有序事件缓冲
         self._subscribers: List[asyncio.Queue] = []
         self.content = ""
@@ -468,6 +469,7 @@ class TaskManager:
         attachments: list = None,
         max_tool_rounds: int = 15,
         regenerate: bool = False,
+        user_id: str = "",
     ) -> int:
         """创建 AiTask 并启动后台执行, 返回 task_id"""
         async with async_session_maker() as db:
@@ -486,7 +488,7 @@ class TaskManager:
             await db.commit()
             task_id = task.id
 
-        rt = RunningTask(task_id, project_id, sender_name=sender_name, model=model)
+        rt = RunningTask(task_id, project_id, sender_name=sender_name, model=model, user_id=user_id)
         cls._tasks[task_id] = rt
         cls._project_tasks.setdefault(project_id, set()).add(task_id)
 
@@ -555,6 +557,7 @@ class TaskManager:
         attachments: list = None,
         max_tool_rounds: int = 15,
         regenerate: bool = False,
+        user_id: str = "",
     ) -> int:
         """创建对话 AI 任务 (不绑定项目) 并启动后台执行, 返回 task_id"""
         from backend.models import Conversation
@@ -576,7 +579,7 @@ class TaskManager:
 
         # 使用负数 conversation_id 作为事件总线的 key, 避免与 project_id 冲突
         scope_id = -conversation_id
-        rt = RunningTask(task_id, scope_id, sender_name=sender_name, model=model)
+        rt = RunningTask(task_id, scope_id, sender_name=sender_name, model=model, user_id=user_id)
         cls._tasks[task_id] = rt
         cls._project_tasks.setdefault(scope_id, set()).add(task_id)
 
@@ -655,6 +658,36 @@ class TaskManager:
                     logger.info(f"✅ 恢复 {len(stale)} 个残留 AI 任务 → failed")
         except Exception as e:
             logger.warning(f"恢复残留任务失败: {e}")
+
+
+# ======================== RAG 检索辅助 ========================
+
+async def _retrieve_rag_context(user_query: str, budget_tokens: int = 2000) -> tuple[str, dict]:
+    """
+    用最新用户消息做 RAG 检索, 返回 (rag_text, section_dict).
+    失败时返回空字符串, 不影响主流程.
+    """
+    if not user_query:
+        return "", {}
+    try:
+        from backend.ai.context.sources.rag import RAGContextSource
+        source = RAGContextSource()
+        sections = await source.gather(
+            budget_tokens=budget_tokens,
+            query=user_query,
+            rag_enabled=True,
+        )
+        if sections:
+            text = sections[0].content
+            section_dict = {
+                "name": "RAG 检索",
+                "tokens": sections[0].tokens or 0,
+                "content": text[:5000],
+            }
+            return text, section_dict
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"RAG 检索跳过: {e}")
+    return "", {}
 
 
 # ======================== 讨论执行逻辑 ========================
@@ -791,6 +824,17 @@ async def _execute_discussion(
             from backend.services.tool_registry import DEFAULT_PERMISSIONS
             tool_permissions = set(raw_perms) if raw_perms else set(DEFAULT_PERMISSIONS)
 
+            # ---- 加载长期记忆 (MemoryService) ----
+            _disc_user_id = rt.user_id or getattr(project, 'created_by', '') or rt.sender_name or "user"
+            try:
+                from backend.ai.memory.user_memory import get_memory_service
+                mem_svc = get_memory_service()
+                memory_text = await mem_svc.load_for_prompt(user_id=_disc_user_id)
+                if memory_text:
+                    extra_parts.append(f"\n{memory_text}")
+            except Exception as mem_err:
+                logger.debug(f"讨论记忆加载失败 (非致命): {mem_err}")
+
             system_prompt, system_sections = context_service.build_project_context(
                 role=role_obj,
                 extra_context="\n".join(extra_parts),
@@ -800,6 +844,17 @@ async def _execute_discussion(
                 ui_labels_override=ui_labels,
                 skills=active_skills,
             )
+
+        # ---- RAG 检索注入 ----
+        user_query = ""
+        for m in reversed(ai_messages):
+            if m.get("role") == "user" and isinstance(m.get("content"), str):
+                user_query = m["content"]
+                break
+        rag_text, rag_section = await _retrieve_rag_context(user_query)
+        if rag_text:
+            system_prompt = system_prompt + "\n\n" + rag_text
+            system_sections.append(rag_section)
 
         # ---- 上下文自动总结 ----
         ai_messages, summary_text = await summarize_context_if_needed(
@@ -1043,6 +1098,37 @@ async def _execute_discussion(
         rt.completed_at = datetime.utcnow()
         await _persist_task_final(rt, "completed", ai_content, thinking_content, collected_tool_calls, token_usage, ai_msg_id)
 
+        # ---- 后台记忆抽取 (讨论, MemoryService) ----
+        try:
+            _disc_pid = str(project_id)
+            _disc_uid = _disc_user_id
+            async def _disc_extract_memories():
+                try:
+                    from backend.ai.memory.user_memory import get_memory_service
+                    mem_svc = get_memory_service()
+                    recent_msgs = []
+                    if ai_messages:
+                        for m in reversed(ai_messages):
+                            if m.get("role") == "user":
+                                recent_msgs.insert(0, m)
+                                break
+                    if ai_content:
+                        recent_msgs.append({"role": "assistant", "content": ai_content})
+                    if recent_msgs:
+                        count = await mem_svc.extract_and_store(
+                            messages=recent_msgs,
+                            user_id=_disc_uid,
+                            project_id=_disc_pid,
+                        )
+                        if count:
+                            logger.info(f"讨论 {_disc_pid} 提取了 {count} 条记忆")
+                            rt.emit({"type": "memory_updated", "count": count})
+                except Exception as ex:
+                    logger.debug(f"讨论记忆抽取失败 (非致命): {ex}")
+            asyncio.create_task(_disc_extract_memories())
+        except Exception:
+            pass
+
     except asyncio.CancelledError:
         logger.info(f"任务 {rt.task_id} 被取消")
         rt.status = "cancelled"
@@ -1228,14 +1314,36 @@ async def _execute_conversation(
             raw_perms = conv.tool_permissions
             tool_permissions = set(raw_perms) if raw_perms else set(DEFAULT_PERMISSIONS)
 
-            system_prompt, system_sections = context_service.build_project_context(
+            # ---- 加载长期记忆 (MemoryService) ----
+            memory_text = ""
+            _user_id = rt.user_id or conv.created_by or "user"
+            try:
+                from backend.ai.memory.user_memory import get_memory_service
+                mem_svc = get_memory_service()
+                memory_text = await mem_svc.load_for_prompt(user_id=_user_id, conversation_id=conversation_id)
+            except Exception as mem_err:
+                logger.debug(f"加载记忆失败 (非致命): {mem_err}")
+
+            system_prompt, system_sections = context_service.build_dogi_context(
                 role=role_obj,
                 extra_context="\n".join(extra_parts) if extra_parts else "",
                 budget_tokens=system_budget,
                 return_sections=True,
                 tool_permissions=tool_permissions,
                 skills=active_skills,
+                memory_text=memory_text,
             )
+
+        # ---- RAG 检索注入 ----
+        user_query = ""
+        for m in reversed(ai_messages):
+            if m.get("role") == "user" and isinstance(m.get("content"), str):
+                user_query = m["content"]
+                break
+        rag_text, rag_section = await _retrieve_rag_context(user_query)
+        if rag_text:
+            system_prompt = system_prompt + "\n\n" + rag_text
+            system_sections.append(rag_section)
 
         # ---- 上下文自动总结 ----
         ai_messages, summary_text = await summarize_context_if_needed(
@@ -1439,6 +1547,52 @@ async def _execute_conversation(
         rt.status = "completed"
         rt.completed_at = datetime.utcnow()
         await _persist_task_final(rt, "completed", ai_content, thinking_content, collected_tool_calls, token_usage, ai_msg_id)
+
+        # ---- 后台记忆抽取 (MemoryService, 不阻塞主流程) ----
+        try:
+            _conv_id = conversation_id
+            _mem_user_id = _user_id
+            async def _extract_memories():
+                try:
+                    from backend.ai.memory.user_memory import get_memory_service
+                    mem_svc = get_memory_service()
+                    # 只取本轮新消息 (最后的 user + assistant)
+                    recent_msgs = []
+                    if ai_messages:
+                        for m in reversed(ai_messages):
+                            if m.get("role") == "user":
+                                recent_msgs.insert(0, m)
+                                break
+                    if ai_content:
+                        recent_msgs.append({"role": "assistant", "content": ai_content})
+
+                    if recent_msgs:
+                        count = await mem_svc.extract_and_store(
+                            messages=recent_msgs,
+                            user_id=_mem_user_id,
+                            conversation_id=_conv_id,
+                        )
+                        if count:
+                            logger.info(f"对话 {_conv_id} 提取了 {count} 条记忆")
+                            rt.emit({"type": "memory_updated", "count": count})
+                except Exception as ex:
+                    logger.debug(f"记忆抽取失败 (非致命): {ex}")
+
+            asyncio.create_task(_extract_memories())
+        except Exception:
+            pass  # 记忆抽取是增值功能, 不影响主流程
+
+        # ---- 自动回写 memory_summary ----
+        if summary_text:
+            try:
+                async with async_session_maker() as sum_db:
+                    sum_result = await sum_db.execute(select(Conversation).where(Conversation.id == conversation_id))
+                    sum_conv = sum_result.scalar_one_or_none()
+                    if sum_conv:
+                        sum_conv.memory_summary = summary_text
+                        await sum_db.commit()
+            except Exception as sw_err:
+                logger.debug(f"回写 memory_summary 失败: {sw_err}")
 
     except asyncio.CancelledError:
         logger.info(f"对话任务 {rt.task_id} 被取消")

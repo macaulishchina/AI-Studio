@@ -91,6 +91,49 @@ class UserRole(str, enum.Enum):
 
 # ======================== Models ========================
 
+class MemoryType(str, enum.Enum):
+    """记忆类型"""
+    fact = "fact"              # 事实
+    decision = "decision"      # 决策
+    preference = "preference"  # 偏好
+    episode = "episode"        # 对话事件摘要
+    profile = "profile"        # 用户画像片段
+
+
+class MemoryItemModel(Base):
+    """
+    长期记忆 ORM 模型 — 存储用户事实/决策/偏好/画像
+
+    核心设计:
+    - user_id 必填, 严格按用户隔离 (多用户命名空间)
+    - embedding 字段存 JSON 向量, 支持混合检索 (向量 + 关键词)
+    - 通过 config_service 的 memory 配置控制行为
+    """
+    __tablename__ = "memory_items"
+
+    id = Column(String(32), primary_key=True)
+    content = Column(Text, nullable=False)
+    memory_type = Column(String(20), nullable=False, default="fact")  # fact/decision/preference/episode/profile
+    user_id = Column(String(100), nullable=False, index=True)         # 必填, 多用户隔离
+    project_id = Column(String(50), nullable=True)                    # 可选, 项目关联
+    conversation_id = Column(Integer, nullable=True, index=True)      # 来源对话
+
+    importance = Column(Float, default=0.5)           # 重要性 0~1
+    embedding = Column(JSON, nullable=True)           # 向量 (JSON array of floats)
+    tags = Column(JSON, default=list)                 # 标签
+    source = Column(String(50), default="")           # extraction/manual/consolidation/rule
+    access_count = Column(Integer, default=0)
+    last_accessed = Column(Float, default=0.0)        # Unix timestamp
+    created_at = Column(Float, default=0.0)           # Unix timestamp
+    updated_at = Column(Float, default=0.0)           # Unix timestamp
+    metadata_json = Column("metadata", JSON, default=dict)  # 额外元数据
+
+    __table_args__ = (
+        # 复合索引: 用户+类型 (最常用查询)
+        # 单列 user_id 索引已由 index=True 创建
+    )
+
+
 class StudioConfig(Base):
     """系统级键值配置（持久化存储，优先于 .env）"""
     __tablename__ = "studio_config"

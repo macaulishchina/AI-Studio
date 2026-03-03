@@ -227,6 +227,8 @@
                   show-password-on="click"
                   size="small"
                   style="flex: 1"
+                  autocomplete="new-password"
+                  :input-props="{ autocomplete: 'new-password', name: 'github-token-' + Date.now() }"
                 />
                 <n-button
                   size="small"
@@ -265,7 +267,7 @@
             <n-space vertical :size="8">
               <n-input-group>
                 <n-input-group-label style="width: 80px">API Key</n-input-group-label>
-                <n-input v-model:value="editingKeys[p.slug]" :placeholder="`已设置 (${p.api_key_hint})`" type="password" show-password-on="click" size="small" style="flex: 1" />
+                <n-input v-model:value="editingKeys[p.slug]" :placeholder="`已设置 (${p.api_key_hint})`" type="password" show-password-on="click" size="small" style="flex: 1" autocomplete="new-password" :input-props="{ autocomplete: 'new-password', name: 'api-key-' + p.slug + '-' + Date.now() }" />
                 <n-button size="small" type="primary" :disabled="!editingKeys[p.slug]" @click="saveApiKey(p)" :loading="saving[p.slug]">保存</n-button>
               </n-input-group>
               <n-input-group v-if="!p.is_builtin">
@@ -306,7 +308,7 @@
               <n-space vertical :size="8">
                 <n-input-group>
                   <n-input-group-label style="width: 80px">API Key</n-input-group-label>
-                  <n-input v-model:value="editingKeys[p.slug]" placeholder="输入 API Key" type="password" show-password-on="click" size="small" style="flex: 1" />
+                  <n-input v-model:value="editingKeys[p.slug]" placeholder="输入 API Key" type="password" show-password-on="click" size="small" style="flex: 1" autocomplete="new-password" :input-props="{ autocomplete: 'new-password', name: 'api-key-' + p.slug + '-' + Date.now() }" />
                   <n-button size="small" type="primary" :disabled="!editingKeys[p.slug]" @click="saveApiKey(p)" :loading="saving[p.slug]">保存</n-button>
                 </n-input-group>
                 <n-input-group v-if="!p.is_builtin">
@@ -342,7 +344,7 @@
           <n-input v-model:value="newProvider.base_url" placeholder="https://api.siliconflow.cn/v1" />
         </n-form-item>
         <n-form-item label="API Key">
-          <n-input v-model:value="newProvider.api_key" placeholder="sk-..." type="password" show-password-on="click" />
+          <n-input v-model:value="newProvider.api_key" placeholder="sk-..." type="password" show-password-on="click" autocomplete="new-password" :input-props="{ autocomplete: 'new-password', name: 'new-api-key-' + Date.now() }" />
         </n-form-item>
         <n-form-item label="图标">
           <n-input v-model:value="newProvider.icon" placeholder="🔌" style="width: 80px" />

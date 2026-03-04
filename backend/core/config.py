@@ -76,12 +76,13 @@ class StudioSettings:
     github_models_endpoint: str = "https://models.inference.ai.azure.com"
 
     # ── RAG / Embedding 配置 ──
-    rag_index_interval_seconds: int = int(os.environ.get("RAG_INDEX_INTERVAL_SECONDS", "300"))
+    rag_index_interval_seconds: int = int(os.environ.get("RAG_INDEX_INTERVAL_SECONDS", "3600"))
     rag_embedding_model: str = os.environ.get("RAG_EMBEDDING_MODEL", "text-embedding-3-small")
     rag_embedding_provider: str = os.environ.get("RAG_EMBEDDING_PROVIDER", "github")
-    rag_embedding_batch_size: int = int(os.environ.get("RAG_EMBEDDING_BATCH_SIZE", "16"))
+    rag_embedding_batch_size: int = int(os.environ.get("RAG_EMBEDDING_BATCH_SIZE", "8"))
     rag_embedding_retry_max: int = int(os.environ.get("RAG_EMBEDDING_RETRY_MAX", "4"))
     rag_embedding_retry_base_seconds: float = float(os.environ.get("RAG_EMBEDDING_RETRY_BASE_SECONDS", "0.8"))
+    rag_batch_delay_seconds: float = float(os.environ.get("RAG_BATCH_DELAY_SECONDS", "2.0"))
 
     # ── 部署配置 ──
     health_check_timeout: int = 60
@@ -153,10 +154,11 @@ class StudioSettings:
             workspace_path = (PROJECT_ROOT / workspace_path).resolve()
         self.workspace_path = str(workspace_path)
 
-        self.rag_index_interval_seconds = max(30, int(self.rag_index_interval_seconds or 300))
-        self.rag_embedding_batch_size = max(1, int(self.rag_embedding_batch_size or 16))
+        self.rag_index_interval_seconds = max(60, int(self.rag_index_interval_seconds or 3600))
+        self.rag_embedding_batch_size = max(1, int(self.rag_embedding_batch_size or 8))
         self.rag_embedding_retry_max = max(0, int(self.rag_embedding_retry_max or 4))
         self.rag_embedding_retry_base_seconds = max(0.1, float(self.rag_embedding_retry_base_seconds or 0.8))
+        self.rag_batch_delay_seconds = max(0.0, float(self.rag_batch_delay_seconds or 2.0))
 
         self.plans_path = os.path.join(self.data_path, "plans")
         self.db_backups_path = os.path.join(self.data_path, "db-backups")

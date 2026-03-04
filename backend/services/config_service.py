@@ -268,6 +268,98 @@ async def get_memory_config() -> dict:
     return result
 
 
+# ── RAG 索引配置管理 ────────────────────────────────────────────────
+
+RAG_CONFIG_KEYS = {
+    "rag_index_interval_seconds",
+    "rag_embedding_batch_size",
+    "rag_batch_delay_seconds",
+}
+
+_RAG_DEFAULTS = {
+    "rag_index_interval_seconds": "3600",
+    "rag_embedding_batch_size": "8",
+    "rag_batch_delay_seconds": "2.0",
+}
+
+_RAG_INT_KEYS = {"rag_index_interval_seconds", "rag_embedding_batch_size"}
+_RAG_FLOAT_KEYS = {"rag_batch_delay_seconds"}
+
+
+async def get_rag_config() -> dict:
+    """获取 RAG 索引配置"""
+    from backend.core.config import settings
+    from backend.core.database import async_session_maker
+
+    raw: dict = {}
+    try:
+        async with async_session_maker() as db:
+            placeholders = ", ".join(f"'{k}'" for k in RAG_CONFIG_KEYS)
+            rows = (await db.execute(
+                text(f"SELECT key, value FROM studio_config WHERE key IN ({placeholders})")
+            )).all()
+            for key, value in rows:
+                raw[key] = value or ""
+    except Exception as e:
+        logger.debug(f"get_rag_config 跳过: {e}")
+
+    # 优先使用数据库值, 其次运行时 settings, 最后默认值
+    result: dict = {}
+    for key in RAG_CONFIG_KEYS:
+        val = raw.get(key, "")
+        if not val:
+            val = str(getattr(settings, key, _RAG_DEFAULTS.get(key, "")))
+        if key in _RAG_INT_KEYS:
+            try:
+                result[key] = int(val)
+            except (ValueError, TypeError):
+                result[key] = int(_RAG_DEFAULTS[key])
+        elif key in _RAG_FLOAT_KEYS:
+            try:
+                result[key] = float(val)
+            except (ValueError, TypeError):
+                result[key] = float(_RAG_DEFAULTS[key])
+        else:
+            result[key] = val
+    return result
+
+
+async def set_rag_config(updates: dict) -> dict:
+    """更新 RAG 索引配置 (持久化 + 运行时同步)"""
+    from backend.core.config import settings
+    from backend.core.database import async_session_maker
+
+    valid_updates = {k: v for k, v in updates.items() if k in RAG_CONFIG_KEYS}
+    if not valid_updates:
+        return await get_rag_config()
+
+    async with async_session_maker() as db:
+        for key, value in valid_updates.items():
+            if key in _RAG_INT_KEYS:
+                db_value = str(int(value)) if value else _RAG_DEFAULTS[key]
+            elif key in _RAG_FLOAT_KEYS:
+                db_value = str(float(value)) if value else _RAG_DEFAULTS[key]
+            else:
+                db_value = str(value).strip() if value else ""
+
+            await db.execute(text(
+                "INSERT INTO studio_config (key, value, updated_at) VALUES (:k, :v, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = :v, updated_at = CURRENT_TIMESTAMP"
+            ), {"k": key, "v": db_value})
+
+        await db.commit()
+
+    # 同步更新运行时 settings
+    for key, value in valid_updates.items():
+        if key in _RAG_INT_KEYS:
+            setattr(settings, key, int(value))
+        elif key in _RAG_FLOAT_KEYS:
+            setattr(settings, key, float(value))
+
+    logger.info(f"RAG 配置已更新: {list(valid_updates.keys())}")
+    return await get_rag_config()
+
+
 async def set_memory_config(updates: dict) -> dict:
     """批量更新记忆配置"""
     from backend.core.database import async_session_maker

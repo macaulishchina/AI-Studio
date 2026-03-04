@@ -62,7 +62,8 @@ class BackgroundIndexer:
     ):
         from backend.core.config import settings
         self.workspace_path = workspace_path or settings.workspace_path
-        self._embed_batch_size = max(1, int(getattr(settings, "rag_embedding_batch_size", 16)))
+        self._embed_batch_size = max(1, int(getattr(settings, "rag_embedding_batch_size", 8)))
+        self._batch_delay = max(0.0, float(getattr(settings, "rag_batch_delay_seconds", 2.0)))
         self._index = vector_index or get_vector_index()
         self._embedder = embedding_service or get_embedding_service()
         self._code_chunker = CodeChunker(max_chunk_tokens=max_chunk_tokens)
@@ -104,6 +105,9 @@ class BackgroundIndexer:
         start = time.time()
         stats = {"scanned": 0, "indexed": 0, "skipped": 0, "errors": 0}
 
+        # 新周期开始: 重置 embedding 熔断器, 让 Provider 有机会恢复
+        self._embedder.reset_circuit_breaker()
+
         files = self._scan_files()
         stats["scanned"] = len(files)
 
@@ -131,8 +135,11 @@ class BackgroundIndexer:
                     logger.warning("索引文件失败 %s: %s", fpath, e)
                     stats["errors"] += 1
 
-            # 让出控制权, 避免阻塞事件循环
-            await asyncio.sleep(0)
+            # 批次间延迟, 降低 API 请求频率避免限流
+            if self._batch_delay > 0 and i + BATCH_SIZE < len(to_index):
+                await asyncio.sleep(self._batch_delay)
+            else:
+                await asyncio.sleep(0)
 
         elapsed = time.time() - start
         logger.info(
@@ -216,6 +223,10 @@ class BackgroundIndexer:
                 embeddings = await self._embedder.embed(texts)
             except Exception:
                 continue
+
+            # 批次间延迟, 降低 embedding API 请求频率
+            if self._batch_delay > 0 and i + self._embed_batch_size < len(valid_chunks):
+                await asyncio.sleep(self._batch_delay)
 
             for chunk, embedding in zip(batch_chunks, embeddings):
                 entry_id = hashlib.md5(

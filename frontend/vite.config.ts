@@ -14,12 +14,12 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/studio-api': {
-        target: 'http://localhost:8002',
+        target: 'http://localhost:8003',
         changeOrigin: true,
         timeout: 300000, // 5分钟超时
       },
       '/studio-uploads': {
-        target: 'http://localhost:8002',
+        target: 'http://localhost:8003',
         changeOrigin: true,
         timeout: 300000,
       },

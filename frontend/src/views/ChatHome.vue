@@ -38,42 +38,51 @@
       </div>
 
       <!-- 无对话选中: 欢迎页 -->
-      <div v-if="!activeConversationId" class="welcome">
-        <div class="welcome-logo">🐕</div>
-        <h1 class="welcome-title">Dogi</h1>
-        <p class="welcome-subtitle">有什么我可以帮你的？</p>
-
-        <div class="quick-actions">
-          <div class="quick-card" v-for="item in quickActions" :key="item.label" @click="sendQuick(item.prompt)">
-            <n-icon :component="item.icon" :size="20" color="#7c6cff" />
-            <span>{{ item.label }}</span>
+      <div v-if="!activeConversationId" class="welcome-view">
+        <!-- 欢迎页也有 header，保持一致 -->
+        <div class="chat-header">
+          <div class="header-left" style="display: flex; align-items: center; gap: 8px;">
+            <n-button
+              v-if="sidebarCollapsed"
+              quaternary
+              circle
+              size="small"
+              @click="sidebarCollapsed = false"
+            >
+              <template #icon><n-icon :component="MenuOutline" /></template>
+            </n-button>
+            <h3>Dogi</h3>
+          </div>
+          <div class="chat-header-actions">
+            <n-button
+              quaternary circle size="small"
+              @click="showConfigModal = true"
+              title="对话配置"
+            >
+              <template #icon><n-icon :component="SettingsOutline" /></template>
+            </n-button>
+            <n-select
+              v-model:value="selectedModel"
+              :options="modelOptions"
+              :render-label="renderModelLabel"
+              size="small"
+              filterable
+              :consistent-menu-width="false"
+              style="min-width: 180px; max-width: 300px"
+            />
           </div>
         </div>
 
-        <div class="input-area welcome-input">
-          <n-input
-            v-model:value="inputText"
-            type="textarea"
-            :autosize="{ minRows: 1, maxRows: 6 }"
-            placeholder="输入消息，开始新对话..."
-            @keydown="handleKeydown"
-            :disabled="sending"
-          />
-          <div class="input-actions">
-            <ModelSelector
-              :model="selectedModel"
-              @update:model="selectedModel = $event"
-            />
-            <n-button
-              type="primary"
-              :loading="sending"
-              :disabled="!inputText.trim()"
-              @click="sendNewMessage"
-              circle
-              size="small"
-            >
-              <template #icon><n-icon :component="SendOutline" /></template>
-            </n-button>
+        <div class="welcome">
+          <div class="welcome-logo">🐕</div>
+          <h1 class="welcome-title">Dogi</h1>
+          <p class="welcome-subtitle">有什么我可以帮你的？</p>
+
+          <div class="quick-actions">
+            <div class="quick-card" v-for="item in quickActions" :key="item.label" @click="sendQuick(item.prompt)">
+              <n-icon :component="item.icon" :size="20" color="#7c6cff" />
+              <span>{{ item.label }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -341,36 +350,37 @@
           </div>
         </div>
 
-        <div class="input-area">
-          <n-input
-            v-model:value="inputText"
-            type="textarea"
-            :autosize="{ minRows: 1, maxRows: 6 }"
-            placeholder="输入消息..."
-            @keydown="handleKeydown"
-            :disabled="sending"
-          />
-          <div class="input-actions">
-            <n-button
-              v-if="streaming"
-              type="error"
-              size="small"
-              @click="cancelStreaming"
-              quaternary
-            >
-              停止
-            </n-button>
-            <n-button
-              type="primary"
-              :loading="sending"
-              :disabled="!inputText.trim() || streaming"
-              @click="sendMessage"
-              circle
-              size="small"
-            >
-              <template #icon><n-icon :component="SendOutline" /></template>
-            </n-button>
-          </div>
+      </div>
+
+      <div class="input-area" :class="{ 'chat-input-area': !!activeConversationId }">
+        <n-input
+          v-model:value="inputText"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 6 }"
+          :placeholder="activeConversationId ? '输入消息...' : '输入消息，开始新对话...'"
+          @keydown="handleKeydown"
+          :disabled="sending"
+        />
+        <div class="input-actions">
+          <n-button
+            v-if="streaming"
+            type="error"
+            size="small"
+            @click="cancelStreaming"
+            quaternary
+          >
+            停止
+          </n-button>
+          <n-button
+            type="primary"
+            :loading="sending"
+            :disabled="!inputText.trim() || (streaming && !!activeConversationId)"
+            @click="activeConversationId ? sendMessage() : sendNewMessage()"
+            circle
+            size="small"
+          >
+            <template #icon><n-icon :component="SendOutline" /></template>
+          </n-button>
         </div>
       </div>
     </div>
@@ -1149,6 +1159,15 @@ watch(showConfigModal, (show) => {
   z-index: 20;
 }
 
+/* ── Welcome View ── */
+.welcome-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
 /* ── Welcome ── */
 .welcome {
   flex: 1;
@@ -1210,31 +1229,40 @@ watch(showConfigModal, (show) => {
 
 /* ── Input Area ── */
 .input-area {
-  padding: 20px 0;
-  /* border-top: 1px solid #2a2a2a; */
+  padding: 20px 24px 24px;
   width: 100%;
   max-width: 800px;
   margin: 0 auto;
   position: relative;
+  z-index: 20;
 }
-.welcome-input {
-  /* Welcome 页特殊的样式 */
+
+/* 通用输入框样式 (欢迎页和聊天页共用) */
+.input-area .n-input {
   background: #1e1e22;
   border: 1px solid #333;
   border-radius: 16px;
-  padding: 12px 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 12px 100px 12px 16px;
   transition: all 0.2s;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
 }
-.welcome-input:focus-within {
+
+.input-area .n-input:focus-within {
   border-color: #7c6cff;
-  box-shadow: 0 8px 24px rgba(124, 108, 255, 0.15);
+  background: #252529;
+  box-shadow: 0 -4px 24px rgba(124, 108, 255, 0.1);
 }
-.input-actions {
+
+/* 通用按钮定位 (欢迎页和聊天页共用) */
+.input-area .input-actions {
+  position: absolute;
+  right: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
   display: flex;
+  gap: 8px;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 12px;
 }
 
 /* ── Chat View ── */
@@ -1388,33 +1416,9 @@ watch(showConfigModal, (show) => {
   background: rgba(124, 108, 255, 0.05);
 }
 
-/* ── Chat Input ── */
-.chat-view .input-area {
-  padding: 0 24px 24px;
-  max-width: 800px;
-  margin: 0 auto;
-  position: relative;
-  z-index: 20;
-}
-.chat-view .input-area .n-input {
-  background: #1e1e22;
-  border: 1px solid #333;
-  border-radius: 16px;
-  padding: 12px 90px 12px 16px; /* 右侧预留给按钮 */
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s;
-}
-.chat-view .input-area .n-input:focus-within {
-  border-color: #7c6cff;
-  box-shadow: 0 -4px 24px rgba(124, 108, 255, 0.1);
-  background: #252529;
-}
-.chat-view .input-actions {
-  position: absolute;
-  bottom: 36px;
-  right: 36px;
-  margin: 0;
-  gap: 8px;
+/* ── Shared Chat Input ── */
+.chat-input-area {
+  margin-top: 0;
 }
 
 /* ── Memory Toast ── */

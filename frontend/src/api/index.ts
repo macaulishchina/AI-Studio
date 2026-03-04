@@ -239,6 +239,9 @@ export const systemApi = {
   // 模型设置 (chat / stt)
   getModelSettings: () => api.get('/system/model-settings'),
   setModelSettings: (data: Record<string, any>) => api.post('/system/model-settings', data),
+  // RAG 索引配置
+  getRagConfig: () => api.get('/system/rag-config'),
+  setRagConfig: (data: Record<string, any>) => api.put('/system/rag-config', data),
 }
 
 // ==================== 工作目录管理 ====================

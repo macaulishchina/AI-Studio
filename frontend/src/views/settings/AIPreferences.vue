@@ -189,6 +189,48 @@
       </n-space>
     </n-card>
 
+    <!-- RAG 索引配置 -->
+    <n-card size="small" style="background: #212121">
+      <template #header>
+        <n-space align="center" :size="8">
+          <span>📚 RAG 索引</span>
+        </n-space>
+      </template>
+      <template #header-extra>
+        <n-button size="tiny" type="primary" ghost :loading="savingRagConfig" @click="saveRagConfig">
+          💾 保存
+        </n-button>
+      </template>
+      <n-space vertical :size="12">
+        <n-text depth="3" style="font-size: 11px">
+          RAG 后台索引器会定期扫描工作区文件并生成向量索引，用于 AI 对话中的代码检索。
+          间隔越长越节约 API 调用额度，但索引更新越慢。
+        </n-text>
+        <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" bordered size="small">
+          <n-descriptions-item label="索引间隔 (秒)">
+            <n-input-number
+              v-model:value="ragConfig.rag_index_interval_seconds"
+              :min="60" :max="86400" :step="300" size="small" style="width: 140px"
+            />
+            <n-text depth="3" style="font-size: 10px; margin-left: 4px">默认 3600 (1小时)</n-text>
+          </n-descriptions-item>
+          <n-descriptions-item label="Embedding 批大小">
+            <n-input-number
+              v-model:value="ragConfig.rag_embedding_batch_size"
+              :min="1" :max="64" size="small" style="width: 100px"
+            />
+          </n-descriptions-item>
+          <n-descriptions-item label="批次间延迟 (秒)">
+            <n-input-number
+              v-model:value="ragConfig.rag_batch_delay_seconds"
+              :min="0" :max="30" :step="0.5" size="small" style="width: 100px"
+            />
+            <n-text depth="3" style="font-size: 10px; margin-left: 4px">降低限流风险</n-text>
+          </n-descriptions-item>
+        </n-descriptions>
+      </n-space>
+    </n-card>
+
     <!-- 模型黑名单 -->
     <n-card size="small" style="background: #212121">
       <template #header>
@@ -260,6 +302,8 @@ const sttDefaultModel = ref<string | null>(null)
 const sttAllowlist = ref<string[]>([])
 const savingChatSettings = ref(false)
 const savingSttSettings = ref(false)
+const savingRagConfig = ref(false)
+const ragConfig = ref({ rag_index_interval_seconds: 3600, rag_embedding_batch_size: 8, rag_batch_delay_seconds: 2.0 })
 
 // ── 模型列表 ──
 const allModels = ref<any[]>([])
@@ -369,6 +413,14 @@ onMounted(async () => {
     console.warn('加载模型设置失败:', e)
   }
 
+  // 加载 RAG 配置
+  try {
+    const { data: ragData } = await systemApi.getRagConfig()
+    ragConfig.value = { ...ragConfig.value, ...ragData }
+  } catch (e: any) {
+    console.warn('加载 RAG 配置失败:', e)
+  }
+
   // 加载聊天模型列表
   loadingModels.value = true
   try {
@@ -405,6 +457,19 @@ async function saveChatSettings() {
     message.error('保存失败: ' + (e?.response?.data?.detail || e.message))
   } finally {
     savingChatSettings.value = false
+  }
+}
+
+async function saveRagConfig() {
+  savingRagConfig.value = true
+  try {
+    const { data } = await systemApi.setRagConfig(ragConfig.value)
+    ragConfig.value = { ...ragConfig.value, ...data }
+    message.success('RAG 索引配置已保存 (下次索引周期生效)')
+  } catch (e: any) {
+    message.error('保存失败: ' + (e?.response?.data?.detail || e.message))
+  } finally {
+    savingRagConfig.value = false
   }
 }
 

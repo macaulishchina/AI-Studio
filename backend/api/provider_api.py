@@ -384,16 +384,59 @@ async def _test_antigravity(provider: AIProvider) -> dict:
 
 
 async def _test_openai_compatible(provider: AIProvider) -> dict:
-    """测试 OpenAI 兼容 API (发送最小 chat 请求)"""
+    """测试 OpenAI 兼容 API (先尝试获取模型列表，如果失败则发送最小 chat 请求)"""
     if not provider.api_key:
         return {"success": False, "message": "请先配置 API Key"}
 
-    # 优先用预设模型列表中的第一个模型做测试
-    test_model = "gpt-3.5-turbo"
-    if provider.default_models:
-        test_model = provider.default_models[0].get("name", test_model)
-
     base_url = provider.base_url.rstrip("/")
+
+    # 策略 1: 先尝试 GET /models (最轻量的验证方式)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{base_url}/models",
+                headers={
+                    "Authorization": f"Bearer {provider.api_key}",
+                    "Accept": "application/json",
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                model_list = data.get("data", data) if isinstance(data, dict) else data
+                model_count = len(model_list) if isinstance(model_list, list) else 0
+                return {
+                    "success": True,
+                    "message": f"连接正常 (发现 {model_count} 个模型)",
+                    "method": "models_api",
+                }
+            elif resp.status_code == 401:
+                return {"success": False, "message": "API Key 无效或已过期 (401)"}
+            elif resp.status_code == 403:
+                return {"success": False, "message": "权限不足 (403), 请检查 API Key 权限"}
+            elif resp.status_code == 404:
+                # /models 端点不存在，尝试策略 2
+                pass
+            else:
+                return {"success": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except httpx.ConnectError as e:
+        return {"success": False, "message": f"无法连接到 {base_url}: {str(e)}"}
+    except httpx.TimeoutException:
+        return {"success": False, "message": f"连接超时 (10s)"}
+    except Exception:
+        # 忽略其他异常，尝试策略 2
+        pass
+
+    # 策略 2: 如果 /models 不可用，尝试发送最小 chat 请求
+    # 从预设模型列表中选择第一个，如果没有则跳过 chat 测试
+    if not provider.default_models:
+        return {
+            "success": False,
+            "message": "无法验证连接: /models 端点不可用且未配置预设模型。请手动添加至少一个模型到预设列表后重试。"
+        }
+
+    test_model = provider.default_models[0].get("name")
+    if not test_model:
+        return {"success": False, "message": "预设模型列表格式错误 (缺少 name 字段)"}
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -417,6 +460,7 @@ async def _test_openai_compatible(provider: AIProvider) -> dict:
                     "success": True,
                     "message": f"连接正常 (模型: {test_model}, 回复: {reply[:50]})",
                     "model_tested": test_model,
+                    "method": "chat_completion",
                 }
             elif resp.status_code == 401:
                 return {"success": False, "message": "API Key 无效或已过期 (401)"}

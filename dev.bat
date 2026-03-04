@@ -94,7 +94,7 @@ goto :eof
 call :ensure_python_deps
 call :check_device_deps
 cd /d "%PROJECT_ROOT%"
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir "%PROJECT_ROOT%backend"
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8003 --reload --reload-dir "%PROJECT_ROOT%backend"
 goto :eof
 
 :run_frontend
@@ -108,13 +108,13 @@ call :ensure_python_deps
 call :ensure_frontend_deps
 call :check_device_deps
 echo [INFO] 启动后端窗口...
-start "AI-Studio Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && set PYTHONPATH=%PYTHONPATH% && set STUDIO_DATA_PATH=%STUDIO_DATA_PATH% && set WORKSPACE_PATH=%WORKSPACE_PATH% && set STUDIO_ADMIN_USER=%STUDIO_ADMIN_USER% && set STUDIO_ADMIN_PASS=%STUDIO_ADMIN_PASS% && set STUDIO_SECRET_KEY=%STUDIO_SECRET_KEY% && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir %PROJECT_ROOT%backend"
+start "AI-Studio Backend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT% && set PYTHONPATH=%PYTHONPATH% && set STUDIO_DATA_PATH=%STUDIO_DATA_PATH% && set WORKSPACE_PATH=%WORKSPACE_PATH% && set STUDIO_ADMIN_USER=%STUDIO_ADMIN_USER% && set STUDIO_ADMIN_PASS=%STUDIO_ADMIN_PASS% && set STUDIO_SECRET_KEY=%STUDIO_SECRET_KEY% && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8003 --reload --reload-dir %PROJECT_ROOT%backend"
 echo [INFO] 启动前端窗口...
 start "AI-Studio Frontend" cmd /k "chcp 65001 >nul && cd /d %PROJECT_ROOT%frontend && npm run dev -- --host 0.0.0.0"
 echo.
 echo [OK] 已启动前后端
 echo      前端: http://localhost:5174/studio/
-echo      后端: http://localhost:8002/studio-api/docs
+echo      后端: http://localhost:8003/studio-api/docs
 echo.
 goto :eof
 

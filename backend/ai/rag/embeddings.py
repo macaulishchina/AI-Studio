@@ -25,7 +25,10 @@ TFIDF_DIM = 256
 
 
 class EmbeddingService:
-    """嵌入向量服务"""
+    """嵌入向量服务 (含熔断器: 连续限流后自动跳过 Provider)"""
+
+    # 熔断冷却时间 (秒) — 被限流后多久才重新尝试 Provider
+    CIRCUIT_BREAKER_COOLDOWN = 300  # 5 分钟
 
     def __init__(
         self,
@@ -40,13 +43,34 @@ class EmbeddingService:
         self._retry_base_seconds = max(0.1, float(retry_base_seconds))
         self._vocab: Dict[str, int] = {}  # TF-IDF 词汇表
         self._idf: Dict[str, float] = {}
+        # 熔断器状态
+        self._circuit_open_until: float = 0.0  # Unix timestamp, >0 表示熔断中
+        self._consecutive_429s: int = 0
+
+    def reset_circuit_breaker(self):
+        """手动重置熔断器 (例如在新的索引周期开始时)"""
+        self._circuit_open_until = 0.0
+        self._consecutive_429s = 0
+
+    @property
+    def is_circuit_open(self) -> bool:
+        """熔断器是否处于打开状态 (跳过 Provider)"""
+        import time as _time
+        return self._circuit_open_until > _time.time()
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """
         获取文本的嵌入向量
 
         优先使用 LLM Provider，失败时 fallback 到 TF-IDF。
+        内置熔断器: 连续 429 失败后自动跳过 Provider，冷却后恢复。
         """
+        import time as _time
+
+        # 熔断器打开时直接走 TF-IDF，不浪费时间重试
+        if self.is_circuit_open:
+            return [self._tfidf_embed(text) for text in texts]
+
         try:
             from backend.ai.llm import get_llm_client
             client = get_llm_client()
@@ -59,6 +83,8 @@ class EmbeddingService:
                         provider_slug=self._provider_slug,
                     )
                     if result and len(result) == len(texts):
+                        # 成功: 重置熔断计数
+                        self._consecutive_429s = 0
                         return result
                     break
                 except ProviderError as e:
@@ -74,6 +100,14 @@ class EmbeddingService:
                         )
                         await asyncio.sleep(wait_for)
                         continue
+                    if e.status_code == 429:
+                        # 所有重试都 429: 触发熔断
+                        self._consecutive_429s += 1
+                        self._circuit_open_until = _time.time() + self.CIRCUIT_BREAKER_COOLDOWN
+                        logger.warning(
+                            "Embedding 连续限流, 熔断器已开启 — %ds 内跳过 Provider 直接使用 TF-IDF fallback",
+                            self.CIRCUIT_BREAKER_COOLDOWN,
+                        )
                     raise
         except Exception as e:
             logger.debug(f"Provider embedding 失败, 使用 TF-IDF fallback: {e}")

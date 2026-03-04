@@ -513,6 +513,20 @@ class _ModelSettingsBody(BaseModel):
     stt_api_key: Optional[str] = None
 
 
+@system_router.get("/rag-config")
+async def get_rag_config_api():
+    """获取 RAG 索引配置"""
+    from backend.services.config_service import get_rag_config
+    return await get_rag_config()
+
+
+@system_router.put("/rag-config")
+async def set_rag_config_api(body: dict):
+    """更新 RAG 索引配置"""
+    from backend.services.config_service import set_rag_config
+    return await set_rag_config(body)
+
+
 @system_router.get("/model-settings")
 async def get_model_settings():
     """获取全局模型配置 (聊天默认模型 / 白名单 / STT 配置)"""

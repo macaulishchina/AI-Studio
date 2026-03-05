@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.config import settings
 from backend.core.database import get_db
 from backend.core.security import get_studio_user, get_optional_studio_user
-from backend.models import Conversation, Message, MessageRole, MessageType, Role, AiTask
+from backend.models import Conversation, Message, MessageRole, MessageType, Role, AiTask, MemoryItemModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio-api/conversations", tags=["Conversations"])
@@ -51,6 +51,7 @@ class ConversationOut(BaseModel):
     role_id: Optional[int] = None
     is_pinned: bool = False
     is_archived: bool = False
+    message_count: int = 0
     created_by: str = ""
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -96,7 +97,21 @@ async def list_conversations(
     q = select(Conversation).where(Conversation.is_archived == archived)
     q = q.order_by(desc(Conversation.is_pinned), desc(Conversation.updated_at))
     result = await db.execute(q)
-    return result.scalars().all()
+    convs = result.scalars().all()
+    if not convs:
+        return []
+
+    conv_ids = [c.id for c in convs]
+    count_rows = await db.execute(
+        select(Message.conversation_id, func.count(Message.id))
+        .where(Message.conversation_id.in_(conv_ids))
+        .group_by(Message.conversation_id)
+    )
+    count_map = {cid: int(cnt) for cid, cnt in count_rows.all()}
+    for conv in convs:
+        setattr(conv, "message_count", count_map.get(conv.id, 0))
+
+    return convs
 
 
 @router.post("", response_model=ConversationOut)
@@ -131,6 +146,10 @@ async def get_conversation(
     conv = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
+    message_count = await db.scalar(
+        select(func.count(Message.id)).where(Message.conversation_id == conv_id)
+    )
+    setattr(conv, "message_count", int(message_count or 0))
     return conv
 
 
@@ -176,6 +195,32 @@ async def delete_conversation(
     conv = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
+    if not conv.is_archived:
+        raise HTTPException(status_code=400, detail="仅支持删除已归档对话")
+
+    # 存在运行中任务时禁止删除，避免任务执行过程中出现脏状态
+    running_task_count = await db.scalar(
+        select(func.count(AiTask.id)).where(
+            AiTask.conversation_id == conv_id,
+            AiTask.status.in_(["pending", "running"]),
+        )
+    )
+    if running_task_count and running_task_count > 0:
+        raise HTTPException(status_code=409, detail="对话仍有进行中的任务，请稍后重试")
+
+    # 先删除关联数据（显式删除，兼容 SQLite 外键约束）
+    await db.execute(
+        AiTask.__table__.delete().where(AiTask.conversation_id == conv_id)
+    )
+    # 先删除关联的消息
+    await db.execute(
+        Message.__table__.delete().where(Message.conversation_id == conv_id)
+    )
+    # 清理长期记忆中与该对话关联的条目（无 FK，需手动）
+    await db.execute(
+        MemoryItemModel.__table__.delete().where(MemoryItemModel.conversation_id == conv_id)
+    )
+
     await db.delete(conv)
     await db.commit()
     return {"status": "deleted"}

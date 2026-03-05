@@ -281,13 +281,17 @@ function renderIcon(icon: any) {
   return () => h(NIcon, null, { default: () => h(icon) })
 }
 
-const menuOptions: MenuOption[] = [
-  { label: '对话', key: 'chat', icon: renderIcon(ChatbubblesOutline) },
-  { label: '项目', key: 'projects', icon: renderIcon(DocumentTextOutline) },
-  { label: '快照', key: 'snapshots', icon: renderIcon(CameraOutline) },
-  { label: '调试', key: 'device-debug', icon: renderIcon(PulseOutline) },
-  { label: '设置', key: 'settings', icon: renderIcon(SettingsOutline) },
-]
+const menuOptions = computed<MenuOption[]>(() => {
+  const options: MenuOption[] = [
+    { label: '对话', key: 'chat', icon: renderIcon(ChatbubblesOutline) },
+    { label: '设置', key: 'settings', icon: renderIcon(SettingsOutline) },
+  ]
+  // 调试入口仅管理员可见
+  if (authStore.isAdmin) {
+    options.push({ label: '调试', key: 'device-debug', icon: renderIcon(PulseOutline) })
+  }
+  return options
+})
 
 // 持久化每个菜单区域最后访问的路径
 const lastPaths: Record<string, string> = {

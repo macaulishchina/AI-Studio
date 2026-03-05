@@ -7,23 +7,63 @@
           <template #icon><n-icon :component="AddOutline" /></template>
           新对话
         </n-button>
+        <div class="archive-switch" title="切换活跃/归档">
+          <n-button
+            quaternary
+            size="small"
+            class="archive-switch-btn"
+            :class="{ active: !showArchived }"
+            @click="showArchived = false"
+          >
+            活跃
+          </n-button>
+          <n-button
+            quaternary
+            size="small"
+            class="archive-switch-btn"
+            :class="{ active: showArchived }"
+            @click="showArchived = true"
+          >
+            归档
+          </n-button>
+        </div>
         <n-button quaternary size="small" circle @click="sidebarCollapsed = !sidebarCollapsed">
           <template #icon><n-icon :component="MenuOutline" /></template>
         </n-button>
       </div>
       <div class="sidebar-list">
         <div
-          v-for="conv in conversations"
+          v-for="conv in displayedConversations"
           :key="conv.id"
           class="conv-item"
-          :class="{ active: conv.id === activeConversationId }"
-          @click="openConversation(conv.id)"
+          :class="{ active: conv.id === activeConversationId, 'is-archived': conv.is_archived }"
+          @click="handleConvClick(conv)"
         >
-          <div class="conv-title">{{ conv.title || '新对话' }}</div>
-          <div class="conv-time">{{ formatTime(conv.updated_at) }}</div>
+          <div class="conv-info">
+            <div class="conv-title">{{ conv.title || '新对话' }}</div>
+            <div class="conv-time">{{ formatTime(conv.updated_at) }}</div>
+          </div>
+          <div class="conv-actions" @click.stop>
+            <n-button
+              v-if="!showArchived"
+              quaternary circle size="tiny"
+              @click="toggleArchiveConversation(conv)"
+              title="归档"
+            >
+              <template #icon><n-icon :component="ArchiveOutline" :size="14" /></template>
+            </n-button>
+            <template v-else>
+              <n-button quaternary circle size="tiny" @click="toggleArchiveConversation(conv)" title="恢复">
+                <template #icon><n-icon :component="ArrowUndoOutline" :size="14" /></template>
+              </n-button>
+              <n-button quaternary circle size="tiny" @click="deleteArchivedConversation(conv)" title="删除">
+                <template #icon><n-icon :component="TrashOutline" :size="14" /></template>
+              </n-button>
+            </template>
+          </div>
         </div>
-        <div v-if="conversations.length === 0" class="empty-hint">
-          还没有对话，开始吧~
+        <div v-if="displayedConversations.length === 0" class="empty-hint">
+          {{ showArchived ? '📁 暂无归档对话' : '💬 还没有对话，开始吧~' }}
         </div>
       </div>
     </div>
@@ -38,7 +78,7 @@
       </div>
 
       <!-- 无对话选中: 欢迎页 -->
-      <div v-if="!activeConversationId" class="welcome-view">
+      <div v-if="showWelcomeView" class="welcome-view">
         <!-- 欢迎页也有 header，保持一致 -->
         <div class="chat-header">
           <div class="header-left" style="display: flex; align-items: center; gap: 8px;">
@@ -100,7 +140,10 @@
             >
               <template #icon><n-icon :component="MenuOutline" /></template>
             </n-button>
-            <h3>{{ activeConversation?.title || '新对话' }}</h3>
+            <h3>
+          {{ activeConversation?.title || '新对话' }}
+          <n-tag v-if="currentConversationArchived" size="tiny" type="warning" style="margin-left: 8px">归档</n-tag>
+        </h3>
           </div>
           <div class="chat-header-actions">
             <n-button
@@ -316,11 +359,11 @@
                           <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
                         </span>
                       </div>
-                      <input v-if="!q.options?.length || getCardState(seg.toolCall.id).answers[qi]?.some((a: string) => a.includes('其他'))"
+                      <input v-if="!q.options?.length || getCardState(seg.toolCall!.id).answers[qi]?.some((a: string) => a.includes('其他'))"
                         class="question-custom-input"
                         :placeholder="q.options?.length ? '请补充说明...' : '请输入你的回答...'"
-                        :value="getCardState(seg.toolCall.id).customTexts[qi] || ''"
-                        @input="(e: any) => getCardState(seg.toolCall.id).customTexts[qi] = e.target.value" />
+                        :value="getCardState(seg.toolCall!.id).customTexts[qi] || ''"
+                        @input="(e: any) => getCardState(seg.toolCall!.id).customTexts[qi] = e.target.value" />
                     </div>
                     <div v-if="seg.toolCall.status !== 'calling'" class="question-submit-row">
                       <n-button size="small" type="primary" @click="submitQuestionCard(seg.toolCall.id, parseQuestions(seg.toolCall.arguments))">提交回答</n-button>
@@ -357,7 +400,7 @@
           v-model:value="inputText"
           type="textarea"
           :autosize="{ minRows: 1, maxRows: 6 }"
-          :placeholder="activeConversationId ? '输入消息...' : '输入消息，开始新对话...'"
+          :placeholder="currentConversationArchived ? '归档对话只读' : (showWelcomeView ? '输入消息，开始新对话...' : '输入消息...')"
           @keydown="handleKeydown"
           :disabled="sending"
         />
@@ -374,7 +417,7 @@
           <n-button
             type="primary"
             :loading="sending"
-            :disabled="!inputText.trim() || (streaming && !!activeConversationId)"
+            :disabled="!inputText.trim() || (streaming && !!activeConversationId) || currentConversationArchived"
             @click="activeConversationId ? sendMessage() : sendNewMessage()"
             circle
             size="small"
@@ -528,6 +571,7 @@ import {
   AddOutline, SendOutline, MenuOutline, CodeSlashOutline,
   ChatbubblesOutline, BookOutline, ConstructOutline,
   SettingsOutline, CheckmarkOutline, CloseOutline,
+  ArchiveOutline, TrashOutline, ArrowUndoOutline,
 } from '@vicons/ionicons5'
 import { conversationApi, skillApi, mcpApi, memoryApi } from '@/api'
 import { useModelSelection } from '@/composables/useModelSelection'
@@ -568,16 +612,35 @@ const streamSegments = ref<Array<{
   toolCall?: { id: string; name: string; arguments: any; status: string; result?: string; duration_ms?: number }
 }>>([])
 const streamToolCalls = ref<any[]>([])
+const loadingMessages = ref(false)
 
 // Conversations list
 const conversations = ref<any[]>([])
+const archivedConversations = ref<any[]>([])
+const showArchived = ref(false)
 const activeConversationId = computed(() => {
   const id = route.params.id
   return id ? Number(id) : null
 })
 const activeConversation = computed(() =>
-  conversations.value.find(c => c.id === activeConversationId.value)
+  [...conversations.value, ...archivedConversations.value].find(c => c.id === activeConversationId.value)
 )
+const currentConversationArchived = computed(() => {
+  const conv = activeConversation.value
+  return conv?.is_archived === true
+})
+const displayedConversations = computed(() => showArchived.value ? archivedConversations.value : conversations.value)
+const activeConversationMessageCount = computed(() => {
+  const value = activeConversation.value?.message_count
+  return typeof value === 'number' ? value : null
+})
+const showWelcomeView = computed(() => {
+  if (!activeConversationId.value) return true
+  if (activeConversationMessageCount.value === 0 && !streaming.value) return true
+  if (activeConversationMessageCount.value && activeConversationMessageCount.value > 0) return false
+  if (loadingMessages.value) return false
+  return messages.value.length === 0 && !streaming.value
+})
 
 function syncSelectedModelFromActiveConversation() {
   const conv = activeConversation.value
@@ -643,24 +706,40 @@ const consolidating = ref(false)
 // ========== API Methods ==========
 async function loadConversations() {
   try {
-    const res = await conversationApi.list()
+    const res = await conversationApi.list({ archived: false })
     conversations.value = res.data
   } catch (e: any) {
     // API not ready yet — silent
     console.warn('conversations API not ready:', e.message)
     conversations.value = []
   }
+  // 加载归档对话
+  try {
+    const res = await conversationApi.list({ archived: true })
+    archivedConversations.value = res.data
+  } catch (e: any) {
+    console.warn('archived conversations API not ready:', e.message)
+    archivedConversations.value = []
+  }
 }
 
 async function loadMessages(convId: number) {
+  loadingMessages.value = true
   try {
     const res = await conversationApi.getMessages(convId)
     messages.value = res.data
+    const messageCount = Array.isArray(res.data) ? res.data.length : 0
+    const active = conversations.value.find(c => c.id === convId)
+    if (active) active.message_count = messageCount
+    const archived = archivedConversations.value.find(c => c.id === convId)
+    if (archived) archived.message_count = messageCount
     await nextTick()
     scrollToBottom()
   } catch (e: any) {
     console.warn('load messages failed:', e.message)
     messages.value = []
+  } finally {
+    loadingMessages.value = false
   }
 }
 
@@ -668,6 +747,7 @@ async function createConversation() {
   try {
     const res = await conversationApi.create({ model: selectedModel.value })
     conversations.value.unshift(res.data)
+    showArchived.value = false
     router.push(`/c/${res.data.id}`)
   } catch (e: any) {
     message.error('创建对话失败: ' + e.message)
@@ -686,11 +766,58 @@ async function updateConversationModel(model: string) {
     try {
       await conversationApi.update(convId, { model })
     } catch (e: any) {
-      console.warn('更新对话模型失败:', e)
+      console.warn('更新对话模型 failed:', e)
     }
   }
 }
 
+// 归档/取消归档对话
+async function toggleArchiveConversation(conv: any) {
+  try {
+    const res = await conversationApi.update(conv.id, { is_archived: !conv.is_archived })
+    const updated = res.data || { ...conv, is_archived: !conv.is_archived }
+
+    if (showArchived.value) {
+      archivedConversations.value = archivedConversations.value.filter(c => c.id !== conv.id)
+      if (!updated.is_archived) {
+        conversations.value = [updated, ...conversations.value.filter(c => c.id !== updated.id)]
+        showArchived.value = false
+      }
+    } else {
+      conversations.value = conversations.value.filter(c => c.id !== conv.id)
+      if (updated.is_archived) {
+        archivedConversations.value = [updated, ...archivedConversations.value.filter(c => c.id !== updated.id)]
+      } else {
+        conversations.value = [updated, ...conversations.value]
+      }
+    }
+
+    // 当前打开的是被操作的对话时，更新本地对象，避免依赖刷新
+    if (activeConversationId.value === conv.id) {
+      const merged = [...conversations.value, ...archivedConversations.value]
+      const current = merged.find(c => c.id === conv.id)
+      if (current) current.is_archived = !!updated.is_archived
+    }
+  } catch (e: any) {
+    message.error('操作失败: ' + e.message)
+  }
+}
+
+// 删除归档对话
+async function deleteArchivedConversation(conv: any) {
+  try {
+    await conversationApi.delete(conv.id)
+    archivedConversations.value = archivedConversations.value.filter(c => c.id !== conv.id)
+    if (activeConversationId.value === conv.id) {
+      router.push('/')
+    }
+    message.success('已删除')
+  } catch (e: any) {
+    message.error('删除失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+// ========== Chat Logic ==========
 // ========== Chat Logic ==========
 async function sendNewMessage() {
   if (!inputText.value.trim()) return
@@ -706,6 +833,7 @@ async function sendNewMessage() {
     })
     const conv = res.data
     conversations.value.unshift(conv)
+    showArchived.value = false
 
     // Navigate to it
     await router.push(`/c/${conv.id}`)
@@ -722,9 +850,24 @@ async function sendNewMessage() {
 
 async function sendMessage() {
   if (!inputText.value.trim() || !activeConversationId.value) return
+  // 检查是否为归档对话
+  const currentConv = [...conversations.value, ...archivedConversations.value].find(c => c.id === activeConversationId.value)
+  if (currentConv?.is_archived) {
+    message.warning('归档对话不能发送消息，请先恢复')
+    return
+  }
   const text = inputText.value.trim()
   inputText.value = ''
   await doSendMessage(activeConversationId.value, text)
+}
+
+// 点击对话项处理
+function handleConvClick(conv: any) {
+  if (showArchived.value) {
+    router.push(`/c/${conv.id}`)
+  } else {
+    openConversation(conv.id)
+  }
 }
 
 async function doSendMessage(convId: number, text: string) {
@@ -744,6 +887,10 @@ async function doSendMessage(convId: number, text: string) {
     content: text,
     created_at: new Date().toISOString(),
   })
+  const active = conversations.value.find(c => c.id === convId)
+  if (active) active.message_count = Math.max(1, Number(active.message_count || 0))
+  const archived = archivedConversations.value.find(c => c.id === convId)
+  if (archived) archived.message_count = Math.max(1, Number(archived.message_count || 0))
   await nextTick()
   scrollToBottom()
 
@@ -1068,6 +1215,8 @@ watch(showConfigModal, (show) => {
 .chat-home {
   display: flex;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: #101014; /* 更深邃的背景 */
   color: #e0e0e0;
 }
@@ -1075,6 +1224,8 @@ watch(showConfigModal, (show) => {
 /* ── Sidebar ── */
 .sidebar {
   width: 280px;
+  height: 100%;
+  min-height: 0;
   background: #18181c;
   border-right: 1px solid #2d2d30;
   display: flex;
@@ -1095,6 +1246,22 @@ watch(showConfigModal, (show) => {
   gap: 8px;
   /* border-bottom: 1px solid #2d2d30; */
 }
+.archive-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid #2d2d30;
+  background: #1b1b20;
+}
+.archive-switch-btn {
+  min-width: 42px;
+  color: #888;
+}
+.archive-switch-btn.active {
+  color: #ddd;
+  background: #2a2a31;
+}
 .sidebar-list {
   flex: 1;
   overflow-y: auto;
@@ -1108,7 +1275,10 @@ watch(showConfigModal, (show) => {
   border-radius: 2px;
 }
 .conv-item {
-  padding: 12px 14px;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 46px 12px 14px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
@@ -1135,6 +1305,29 @@ watch(showConfigModal, (show) => {
   color: #777;
   margin-top: 4px;
 }
+.conv-info {
+  flex: 1;
+  min-width: 0;
+}
+.conv-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.conv-item:hover .conv-actions,
+.conv-item.active .conv-actions {
+  opacity: 1;
+}
+.conv-item.is-archived {
+  opacity: 0.7;
+}
+.conv-item.is-archived .conv-title {
+  color: #888;
+}
 .empty-hint {
   text-align: center;
   color: #555;
@@ -1145,6 +1338,8 @@ watch(showConfigModal, (show) => {
 /* ── Main Area ── */
 .main-area {
   flex: 1;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   min-width: 0;
